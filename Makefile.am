@@ -70,6 +70,12 @@ src_libopenslide_la_CPPFLAGS = -D_OPENSLIDE_BUILDING_DLL \
 
 src_libopenslide_la_LDFLAGS = -version-info 4:1:4 -no-undefined
 
+if USE_LIBJXR
+src_libopenslide_la_SOURCES += src/openslide-decode-jxr.c
+src_libopenslide_la_SOURCES += src/openslide-vendor-zeiss.c
+src_libopenslide_la_LIBADD += $(LIBJXR_LIBS)
+src_libopenslide_la_CPPFLAGS += $(LIBJXR_CFLAGS)
+endif
 
 pkginclude_HEADERS = \
 	src/openslide.h \

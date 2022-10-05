@@ -138,6 +138,9 @@ extern const struct _openslide_format _openslide_format_sakura;
 extern const struct _openslide_format _openslide_format_synthetic;
 extern const struct _openslide_format _openslide_format_trestle;
 extern const struct _openslide_format _openslide_format_ventana;
+#ifdef HAVE_LIBJXR
+extern const struct _openslide_format _openslide_format_zeiss;
+#endif
 
 /* GHashTable utils */
 void _openslide_int64_free(gpointer data);

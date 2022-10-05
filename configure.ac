@@ -44,6 +44,7 @@ AC_DEFINE_UNQUOTED([SUFFIXED_VERSION], ["$SUFFIXED_VERSION"],
                    [Define to the package version string including any suffix.])
 AC_SUBST([SUFFIXED_VERSION])
 
+export PKG_CONFIG_PATH=".:$PKG_CONFIG_PATH"
 
 # libraries
 AC_SEARCH_LIBS([floor], [m],, AC_MSG_FAILURE([cannot find math library]))
@@ -60,6 +61,7 @@ PKG_CHECK_MODULES(LIBJPEG, [libjpeg], [], [
 ])
 
 PKG_CHECK_MODULES(OPENJPEG, [libopenjp2 >= 2.1.0])
+PKG_CHECK_MODULES(LIBJXR, [libjxr])
 PKG_CHECK_MODULES(LIBTIFF, [libtiff-4])
 PKG_CHECK_MODULES(GLIB2, [glib-2.0 >= 2.56, gthread-2.0, gio-2.0, gobject-2.0])
 PKG_CHECK_MODULES(CAIRO, [cairo >= 1.2])

@@ -14,7 +14,7 @@ lib_LTLIBRARIES = src/libopenslide.la
 
 src_libopenslide_la_LIBADD = $(GLIB2_LIBS) $(CAIRO_LIBS) $(SQLITE3_LIBS) \
 	$(LIBXML2_LIBS) $(OPENJPEG_LIBS) $(LIBTIFF_LIBS) $(LIBPNG_LIBS) \
-	$(LIBJPEG_LIBS) $(GDKPIXBUF_LIBS) $(ZLIB_LIBS)
+	$(LIBJPEG_LIBS) $(LIBJXR_LIBS) $(GDKPIXBUF_LIBS) $(ZLIB_LIBS)
 
 src_libopenslide_la_SOURCES = \
 	src/openslide.c \
@@ -22,6 +22,7 @@ src_libopenslide_la_SOURCES = \
 	src/openslide-decode-gdkpixbuf.c \
 	src/openslide-decode-jp2k.c \
 	src/openslide-decode-jpeg.c \
+	src/openslide-decode-jxr.c \
 	src/openslide-decode-png.c \
 	src/openslide-decode-sqlite.c \
 	src/openslide-decode-tiff.c \
@@ -43,7 +44,8 @@ src_libopenslide_la_SOURCES = \
 	src/openslide-vendor-sakura.c \
 	src/openslide-vendor-synthetic.c \
 	src/openslide-vendor-trestle.c \
-	src/openslide-vendor-ventana.c
+	src/openslide-vendor-ventana.c \
+	src/openslide-vendor-zeiss.c
 
 EXTRA_PROGRAMS = src/make-tables
 CLEANFILES = src/make-tables
@@ -65,6 +67,7 @@ endif
 src_libopenslide_la_CPPFLAGS = -D_OPENSLIDE_BUILDING_DLL \
 	$(GLIB2_CFLAGS) $(CAIRO_CFLAGS) $(SQLITE3_CFLAGS) $(LIBXML2_CFLAGS) \
 	$(OPENJPEG_CFLAGS) $(LIBTIFF_CFLAGS) $(LIBPNG_CFLAGS) \
+	$(LIBJXR_CFLAGS) \
 	$(GDKPIXBUF_CFLAGS) $(ZLIB_CFLAGS) -DG_LOG_DOMAIN=\"Openslide\" \
 	-I$(top_srcdir)/src
 

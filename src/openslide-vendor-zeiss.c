@@ -215,6 +215,11 @@ static void destroy_level(struct level *l) {
   g_slice_free(struct level, l);
 }
 
+static void destroy_subblk(struct czi_subblk *p)
+{
+  g_slice_free(struct czi_subblk, p);
+}
+
 static void destroy(openslide_t *osr) {
   for (int32_t i = 0; i < osr->level_count; i++) {
     destroy_level((struct level *) osr->levels[i]);
@@ -225,7 +230,9 @@ static void destroy(openslide_t *osr) {
   g_free(data->filename);
   g_hash_table_destroy(data->count_tile_width);
   g_hash_table_destroy(data->count_tile_height);
+  g_hash_table_destroy(data->grids);
 
+  g_ptr_array_free(data->subblks, TRUE);
   g_slice_free(struct zeiss_ops_data, data);
 }
 
@@ -370,7 +377,7 @@ static int read_dir_entry(GPtrArray *subblks, char *p)
 static bool read_subblk_dir(openslide_t *osr, GError **err)
 {
   struct zeiss_ops_data *data = osr->data;
-  data->subblks = g_ptr_array_new();
+  data->subblks = g_ptr_array_new_full(64, (GDestroyNotify) destroy_subblk);
 
   g_autoptr(_openslide_file) f = _openslide_fopen(data->filename, err);
   if (!f)
@@ -462,19 +469,19 @@ static bool read_data_from_subblk(openslide_t *osr, struct czi_subblk *sb,
   // only work with BGR24 for now
   if (sb->pixel_type != PT_BGR24) {
     printf("debug read_data_from_subblk: wrong pixel_type\n");
-    return NULL;
+    return false;
   }
 
   //printf("debug: subblock file_pos = %ld\n", sb->file_pos);
   struct zeiss_ops_data *data = osr->data;
   g_autoptr(_openslide_file) f = _openslide_fopen(data->filename, err);
   if (!f)
-    return NULL;
+    return false;
 
   int64_t pos = sb->file_pos + 32;
   if (!_openslide_fseek(f, pos, SEEK_SET, err)) {
     g_prefix_error(err, "Couldn't seek to SubBlock");
-    return NULL;
+    return false;
   }
 
   char buf[512];
@@ -491,7 +498,7 @@ static bool read_data_from_subblk(openslide_t *osr, struct czi_subblk *sb,
   //printf("debug: datalen = %ld, datastart = %ld\n", hdr->data_size,pos);
   if (!_openslide_fseek(f, pos, SEEK_SET, err)) {
     g_prefix_error(err, "Couldn't seek to pixel data");
-    return NULL;
+    return false;
   }
 
   len = (size_t) GINT64_FROM_LE(hdr->data_size);
@@ -501,13 +508,12 @@ static bool read_data_from_subblk(openslide_t *osr, struct czi_subblk *sb,
   if (_openslide_fread(f, buf2, len) != len) {
     g_set_error(err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_FAILED,
                 "Cannot read pixel data");
-    return NULL;
+    return false;
   }
 
   switch (sb->compression) {
   case COMP_JXR:
     _openslide_jxr_decode_buf(buf2, len, (struct decoded_jxr *) dest, NULL);
-    //printf("debug: finish _openslide_jxr_decode_buf\n");
     break;
 
   case COMP_JPEG:
@@ -520,11 +526,6 @@ static bool read_data_from_subblk(openslide_t *osr, struct czi_subblk *sb,
     break;
   }
 
-  fprintf(stderr, "debug read_tile: pos = %ld, ds %ld, (x1,y1)(%d,%d), tw,th = %d, %d\n",
-      sb->file_pos, sb->downsample_i, sb->x1, sb->y1, sb->tw, sb->th);
-  /*
-      */
-
   return true;
 }
 
@@ -535,9 +536,9 @@ static bool read_tile(openslide_t *osr, cairo_t *cr,
 {
   struct czi_subblk *sb = data;
 
+  /*
   fprintf(stderr, "debug read_tile: pos = %ld, ds %ld, x1,y1(%d,%d), tw,th = %d, %d\n",
       sb->file_pos, sb->downsample_i, sb->x1, sb->y1, sb->tw, sb->th);
-  /*
       */
 
   g_autoptr(_openslide_cache_entry) cache_entry = NULL;
@@ -546,6 +547,7 @@ static bool read_tile(openslide_t *osr, cairo_t *cr,
                                                   &cache_entry);
   struct decoded_jxr dest;
   if (!img) {
+    fprintf(stderr, "cache missing\n");
     read_data_from_subblk(osr, sb, &dest, NULL);
     g_assert(sb->tw == dest.w);
     g_assert(sb->th == dest.h);
@@ -558,11 +560,6 @@ static bool read_tile(openslide_t *osr, cairo_t *cr,
 
   int stride = cairo_format_stride_for_width(CAIRO_FORMAT_RGB24, sb->tw);
 
-  /*
-  printf("debug img first 4 bytes: 0x %x %x %x %x\n",
-      img[0], img[1], img[2], img[3]);
-  */
-
   g_autoptr(cairo_surface_t) surface =
     cairo_image_surface_create_for_data((unsigned char *) img,
                                         CAIRO_FORMAT_RGB24,
@@ -574,11 +571,6 @@ static bool read_tile(openslide_t *osr, cairo_t *cr,
   return true;
 }
 
-static void destroy_tile(struct czi_subblk *p)
-{
-  g_slice_free(struct czi_subblk, p);
-}
-
 static void finish_adding_tiles(void *key G_GNUC_UNUSED, void *value,
                                 void *user_data G_GNUC_UNUSED)
 {
@@ -586,9 +578,19 @@ static void finish_adding_tiles(void *key G_GNUC_UNUSED, void *value,
   _openslide_grid_range_finish_adding_tiles(grid);
 }
 
+static void destroy_int64_key(void *p)
+{
+  g_slice_free(int64_t, p);
+}
+
 static void destroy_freq_count(void *p)
 {
   g_slice_free(struct freq_count, p);
+}
+
+static void destroy_wh_count_hashtable(void *p)
+{
+  g_hash_table_destroy((GHashTable *) p);
 }
 
 /* count occurrence of tile width and height for each level */
@@ -603,7 +605,8 @@ static void count_tile_width_height(openslide_t *osr, int64_t downsample,
   // one hashtable for each level
   level_w = g_hash_table_lookup(data->count_tile_width, &downsample);
   if (!level_w) {
-    level_w = g_hash_table_new_full(g_int64_hash, g_int64_equal, NULL,
+    level_w = g_hash_table_new_full(g_int64_hash, g_int64_equal,
+                                    (GDestroyNotify) destroy_int64_key,
                                     (GDestroyNotify) destroy_freq_count);
     k = g_new(int64_t, 1);
     *k = downsample;
@@ -613,7 +616,8 @@ static void count_tile_width_height(openslide_t *osr, int64_t downsample,
 
   level_h = g_hash_table_lookup(data->count_tile_height, &downsample);
   if (!level_h) {
-    level_h = g_hash_table_new_full(g_int64_hash, g_int64_equal, NULL,
+    level_h = g_hash_table_new_full(g_int64_hash, g_int64_equal,
+                                    (GDestroyNotify) destroy_int64_key,
                                     (GDestroyNotify) destroy_freq_count);
     k = g_new(int64_t, 1);
     *k = downsample;
@@ -654,14 +658,16 @@ static bool init_range_grids(openslide_t *osr, GError **err G_GNUC_UNUSED)
   struct level *l;
   int64_t *k;
 
-  data->grids = g_hash_table_new(g_int64_hash, g_int64_equal);
+  data->grids = g_hash_table_new_full(g_int64_hash, g_int64_equal,
+                                      (GDestroyNotify) destroy_int64_key,
+                                      (GDestroyNotify) _openslide_grid_destroy);
   for (int i = 0; i < osr->level_count; i++) {
     l = (struct level *) osr->levels[i];
     fprintf(stderr, "debug: level %d, ds %ld, common tw,th = %ld,%ld\n",
         i, l->downsample_i, l->base.tile_w, l->base.tile_h);
     grid = _openslide_grid_create_range(osr, l->base.tile_w, l->base.tile_h,
                                         read_tile,
-                                        (GDestroyNotify) destroy_tile);
+                                        NULL);
     k = g_new(int64_t, 1);
     *k = l->downsample_i;
     g_hash_table_insert(data->grids, k, grid);
@@ -745,9 +751,9 @@ static bool init_levels(openslide_t *osr, GError **err G_GNUC_UNUSED)
 
   GList *downsamples = g_hash_table_get_keys(data->count_tile_width);
   GList *p = g_list_sort(downsamples, (GCompareFunc) cmp_int64);
+  downsamples = p;
 
-  g_autoptr(GPtrArray) levels =
-    g_ptr_array_new_with_free_func((GDestroyNotify) destroy_level);
+  g_autoptr(GPtrArray) levels = g_ptr_array_new();
   int64_t downsample_i;
   while (p) {
     //printf("debug: downsample_i = %ld\n", *((int64_t *) p->data));
@@ -767,10 +773,10 @@ static bool init_levels(openslide_t *osr, GError **err G_GNUC_UNUSED)
 
   g_assert(osr->levels == NULL);
   osr->level_count = levels->len;
-  osr->levels = (struct _openslide_level **)
-    g_ptr_array_free(g_steal_pointer(&levels), false);
+  osr->levels = (struct _openslide_level **) g_ptr_array_free(levels, false);
 
-  g_list_free(p);
+  //g_list_free(p);
+  g_list_free(downsamples);
 
   printf("debug: total %d levels\n", osr->level_count);
   return true;
@@ -891,23 +897,23 @@ static void *parse_xml_set_prop(openslide_t *osr, const char *xml, GError **err)
       "/ImageDocument/Metadata/Information/Image/SizeS/text()");
   data->scene = (int32_t) atol(size_s);
 
-
   double d;
+  char buf[G_ASCII_DTOSTR_BUF_SIZE];
   // in meter/pixel
   g_autofree char *mpp_x =
     _openslide_xml_xpath_get_string(ctx,
       "/ImageDocument/Metadata/Scaling/Items/Distance[@Id='X']/Value/text()");
   d = _openslide_parse_double(mpp_x);
+  g_ascii_dtostr(buf, sizeof(buf), d * 1000000.0);
   // in um/pixel
-  set_prop(osr, OPENSLIDE_PROPERTY_NAME_MPP_X,
-           _openslide_format_double(d * 1000000.0));
+  set_prop(osr, OPENSLIDE_PROPERTY_NAME_MPP_X, buf);
 
   g_autofree char *mpp_y =
     _openslide_xml_xpath_get_string(ctx,
       "/ImageDocument/Metadata/Scaling/Items/Distance[@Id='Y']/Value/text()");
   d = _openslide_parse_double(mpp_y);
-  set_prop(osr, OPENSLIDE_PROPERTY_NAME_MPP_Y,
-           _openslide_format_double(d * 1000000.0));
+  g_ascii_dtostr(buf, sizeof(buf), d * 1000000.0);
+  set_prop(osr, OPENSLIDE_PROPERTY_NAME_MPP_Y, buf);
 
   g_autofree char *obj =
     _openslide_xml_xpath_get_string(ctx,
@@ -969,8 +975,15 @@ static bool zeiss_open(openslide_t *osr, const char *filename,
   data->offset_x = G_MAXINT32;
   data->offset_y = G_MAXINT32;
   data->filename = NULL;
-  data->count_tile_width = g_hash_table_new(g_int64_hash, g_int64_equal);
-  data->count_tile_height = g_hash_table_new(g_int64_hash, g_int64_equal);
+  data->count_tile_width =
+    g_hash_table_new_full(g_int64_hash, g_int64_equal,
+                          (GDestroyNotify) destroy_int64_key,
+                          (GDestroyNotify) destroy_wh_count_hashtable);
+
+  data->count_tile_height =
+    g_hash_table_new_full(g_int64_hash, g_int64_equal,
+                          (GDestroyNotify) destroy_int64_key,
+                          (GDestroyNotify) destroy_wh_count_hashtable);
 
   // store osr data
   g_assert(osr->data == NULL);

@@ -83,10 +83,10 @@ static guint get_bits_per_pixel(const PKPixelFormatGUID *pixel_format)
  */
 static void convert_24bppbgr_to_cario24bpprgb(struct decoded_jxr *p)
 {
-  uint32_t new_size = p->w * p->h * 4;
+  size_t new_size = p->w * p->h * 4;
   uint32_t *buf = g_slice_alloc(new_size);
   uint32_t *bp = buf;
-  uint32_t i = 0;
+  size_t i = 0;
   if (p->pixel_size != 24) {
     fprintf(stderr, "Skip convert, pixel size is %d\n", p->pixel_size);
     return;
@@ -96,6 +96,7 @@ static void convert_24bppbgr_to_cario24bpprgb(struct decoded_jxr *p)
     *bp++ = BGR24TOARGB32(&p->data[i]);
     i += 3;
   }
+
 
   g_slice_free1(p->size, p->data);
   p->stride = p->w * 4;
@@ -139,12 +140,12 @@ bool _openslide_jxr_decode_buf(void *data, size_t datalen,
   Call(pConverter->Initialize(pConverter, pDecoder, NULL, fmt_out));
   Call(pConverter->Copy(pConverter, &rect, dest->data, dest->stride));
 
+  CloseWS_Memory(&pStream);
   pDecoder->Release(&pDecoder);
   pConverter->Release(&pConverter);
 
   convert_24bppbgr_to_cario24bpprgb(dest);
 
-  //fprintf(stderr, "debug: jxrdecoded w,h = %d,%d\n", dest->w, dest->h);
 Cleanup:
   print_err(err);
 

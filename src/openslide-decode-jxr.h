@@ -32,13 +32,12 @@ typedef struct decoded_jxr {
   uint8_t *data;
   uint32_t w;
   uint32_t h;
-  uint32_t size;
+  size_t size;
   uint32_t stride;
   uint32_t pixel_size;
 } decoded_jxr;
 
 static void decoded_jxr_free(struct decoded_jxr *p) {
-  //Call(PKFreeAligned(&p->data));
   g_slice_free1(p->size, p->data);
   g_slice_free1(sizeof(struct decoded_jxr), p);
 }

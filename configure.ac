@@ -44,6 +44,7 @@ AC_DEFINE_UNQUOTED([SUFFIXED_VERSION], ["$SUFFIXED_VERSION"],
                    [Define to the package version string including any suffix.])
 AC_SUBST([SUFFIXED_VERSION])
 
+export PKG_CONFIG_PATH=".:$PKG_CONFIG_PATH"
 
 # libraries
 AC_SEARCH_LIBS([floor], [m],, AC_MSG_FAILURE([cannot find math library]))
@@ -72,6 +73,11 @@ PKG_CHECK_MODULES(SQLITE3, [sqlite3 >= 3.14])
 PKG_CHECK_MODULES(VALGRIND, [valgrind], [
   AC_DEFINE([HAVE_VALGRIND], [1], [Define to 1 if you have the Valgrind headers.])
 ], [:])
+
+PKG_CHECK_MODULES(LIBJXR, [libjxr], [HAVE_LIBJXR=1], [HAVE_LIBJXR=0])
+AM_CONDITIONAL([USE_LIBJXR], [test "$HAVE_LIBJXR" -eq 1])
+AS_IF([test "$HAVE_LIBJXR" -eq 1], [
+  AC_DEFINE([HAVE_LIBJXR], [1], [Define to 1 if have jxr headers.])])
 
 gl_VISIBILITY
 

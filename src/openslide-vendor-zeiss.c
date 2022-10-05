@@ -246,9 +246,11 @@ static bool paint_region(openslide_t *osr, cairo_t *cr,
   struct _openslide_grid *grid = g_hash_table_lookup(data->grids, &ds);
   void *unused_args = NULL;
 
+  // need convert level 0 x,y to x,y on current level
   if (!_openslide_grid_paint_region(grid, cr, &unused_args,
-                                    x, y, level, w, h, err)) {
-                                  //x, y, level, l->base.w, l->base.h, err)) {
+                                    x / l->base.downsample,
+                                    y / l->base.downsample,
+                                    level, w, h, err)) {
       return false;
   }
 
@@ -533,9 +535,9 @@ static bool read_tile(openslide_t *osr, cairo_t *cr,
 {
   struct czi_subblk *sb = data;
 
-  /*
   fprintf(stderr, "debug read_tile: pos = %ld, ds %ld, x1,y1(%d,%d), tw,th = %d, %d\n",
       sb->file_pos, sb->downsample_i, sb->x1, sb->y1, sb->tw, sb->th);
+  /*
       */
 
   g_autoptr(_openslide_cache_entry) cache_entry = NULL;
@@ -704,9 +706,8 @@ static inline int64_t find_most_common(GHashTable *ht, int64_t downsample)
   GHashTable *level;
   struct freq_count cnt = {.count = 0};
 
-  fprintf(stderr, "find_most_common: ds %ld level ht has %d keys\n",
-      downsample, g_hash_table_size(ht));
-
+  //fprintf(stderr, "find_most_common: ds %ld level ht has %d keys\n",
+  //    downsample, g_hash_table_size(ht));
   level = g_hash_table_lookup(ht, &downsample);
   if (!level) {
     fprintf(stderr, "find_most_common: ds %ld level is NULL\n", downsample);
@@ -714,7 +715,7 @@ static inline int64_t find_most_common(GHashTable *ht, int64_t downsample)
   }
 
   g_hash_table_foreach(level, (GHFunc)iter_common, &cnt);
-  printf("debug: tw th %ld has %ld tiles\n", cnt.value, cnt.count);
+  //printf("debug: tw th %ld has %ld tiles\n", cnt.value, cnt.count);
   return cnt.value;
 }
 

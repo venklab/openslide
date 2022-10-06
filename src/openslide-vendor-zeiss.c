@@ -580,7 +580,8 @@ static void finish_adding_tiles(void *key G_GNUC_UNUSED, void *value,
 
 static void destroy_int64_key(void *p)
 {
-  g_slice_free(int64_t, p);
+  //g_slice_free(int64_t, p);
+  g_free(p);
 }
 
 static void destroy_freq_count(void *p)
@@ -753,7 +754,7 @@ static bool init_levels(openslide_t *osr, GError **err G_GNUC_UNUSED)
   GList *p = g_list_sort(downsamples, (GCompareFunc) cmp_int64);
   downsamples = p;
 
-  g_autoptr(GPtrArray) levels = g_ptr_array_new();
+  GPtrArray *levels = g_ptr_array_new();
   int64_t downsample_i;
   while (p) {
     //printf("debug: downsample_i = %ld\n", *((int64_t *) p->data));

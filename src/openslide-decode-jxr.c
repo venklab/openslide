@@ -28,7 +28,8 @@
 #include "openslide-decode-jxr.h"
 
 #define BGR24TOARGB32(p)                                                       \
-  ((uint32_t)((p)[0]) | ((uint32_t)((p)[1]) << 8) | ((uint32_t)((p)[2]) << 16))
+  (0xFF000000 | (uint32_t)((p)[0]) | ((uint32_t)((p)[1]) << 8) |               \
+   ((uint32_t)((p)[2]) << 16))
 
 static struct wmp_err_msg {
   ERR id;
@@ -60,7 +61,6 @@ static void print_err(ERR err)
     return;
 
   struct wmp_err_msg *p = &msgs[0];
-  fprintf(stderr, "_openslide_jxr_decode_buf error: %ld\n", err);
   while ((p++)->msg) {
     if (p->id == err) {
       fprintf(stderr, "_openslide_jxr_decode_buf error: %s\n", p->msg);
@@ -81,15 +81,17 @@ static guint get_bits_per_pixel(const PKPixelFormatGUID *pixel_format)
 /* GUID_PKPixelFormat24bppBGR has 24bits per pixel. CAIRO_FORMAT_RGB24 has
  * 32bits, with the upper 8 bits unused
  */
-static void convert_24bppbgr_to_cario24bpprgb(struct decoded_jxr *p)
+bool convert_24bppbgr_to_cario24bpprgb(struct decoded_img *p)
 {
   size_t new_size = p->w * p->h * 4;
   uint32_t *buf = g_slice_alloc(new_size);
   uint32_t *bp = buf;
   size_t i = 0;
   if (p->pixel_size != 24) {
-    fprintf(stderr, "Skip convert, pixel size is %d\n", p->pixel_size);
-    return;
+    fprintf(stderr,
+            "Skip convert 24bppBGR to ARGB because pixel size is %d, not 24\n",
+            p->pixel_size);
+    return false;
   }
 
   while (i < p->size) {
@@ -97,16 +99,17 @@ static void convert_24bppbgr_to_cario24bpprgb(struct decoded_jxr *p)
     i += 3;
   }
 
-
   g_slice_free1(p->size, p->data);
   p->stride = p->w * 4;
   p->pixel_size = 32;
   p->size = new_size;
   p->data = (uint8_t *) buf;
+
+  return true;
 }
 
 bool _openslide_jxr_decode_buf(void *data, size_t datalen,
-                               struct decoded_jxr *dest,
+                               struct decoded_img *dest,
                                GError **unused G_GNUC_UNUSED)
 {
   PKFormatConverter *pConverter = NULL;
@@ -150,4 +153,29 @@ Cleanup:
   print_err(err);
 
   return true;
+}
+
+/* read JPEG XR encoded data from file
+ * @pos and @len is the start and length of encoded data
+ * A CZI file has many tiles encoded in JPEG XR */
+bool _openslide_jxr_read(const char *filename, int64_t pos, int64_t len,
+                         struct decoded_img *dest, GError **err)
+{
+  g_autoptr(_openslide_file) f = _openslide_fopen(filename, err);
+  if (!f)
+    return false;
+
+  if (!_openslide_fseek(f, pos, SEEK_SET, err)) {
+    g_prefix_error(err, "Couldn't seek to jxr pixel data");
+    return false;
+  }
+
+  g_autofree char *buf = g_malloc(len);
+  if (_openslide_fread(f, buf, (size_t) len) != (size_t) len) {
+    g_set_error(err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_FAILED,
+                "Cannot read pixel data");
+    return false;
+  }
+
+  return _openslide_jxr_decode_buf(buf, len, dest, err);
 }

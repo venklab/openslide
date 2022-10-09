@@ -304,6 +304,9 @@ static void destroy_ops_data(struct zeiss_ops_data *data)
   if (data->count_levels)
     g_hash_table_destroy(data->count_levels);
 
+  if (data->addr_subblks)
+    g_hash_table_destroy(data->addr_subblks);
+
   if (data->grids)
     g_hash_table_destroy(data->grids);
 
@@ -501,7 +504,7 @@ static bool read_subblk_dir(struct zeiss_ops_data *data, GError **err)
   }
 
   data->nsubblk = GINT32_FROM_LE(hdr->entry_count);
-  printf("debug total %d subblocks\n", data->nsubblk);
+  //printf("debug total %d subblocks\n", data->nsubblk);
 
   len = (size_t) GINT32_FROM_LE(hdr->seg_hdr.allocated_size);
   len -= 128;  // DirectoryEntryDV list starts at offset 128 of segment data
@@ -548,7 +551,7 @@ static bool adjust_coordinate_origin(struct zeiss_ops_data *data,
       data->offset_y = b->y1;
   }
 
-  printf("debug: set offset x,y = %d, %d\n", data->offset_x, data->offset_y);
+  //printf("debug: set offset x,y = %d, %d\n", data->offset_x, data->offset_y);
   for (guint i = 0; i < subblks->len; i++) {
     b = subblks->pdata[i];
     b->x1 -= data->offset_x;
@@ -918,7 +921,7 @@ static bool init_levels(openslide_t *osr, GError **err G_GNUC_UNUSED)
   downsamples = p;
 
   while (p) {
-    printf("debug: downsample_i = %ld\n", *((int64_t *) p->data));
+    //printf("debug: downsample_i = %ld\n", *((int64_t *) p->data));
     downsample_i = *((int64_t *) p->data);
     l = g_slice_new0(struct level);
     l->base.downsample = (double) downsample_i;
@@ -989,8 +992,6 @@ static void destroy_addr_key(struct czi_address_key *k) {
 }
 
 static void destroy_addr(struct czi_address *addr) {
-  // only free the array container
-  g_slice_free1(MAX_CHANNEL, (struct czi_subblk **) addr->subblks);
   g_slice_free(struct czi_address, addr);
 }
 
@@ -1125,7 +1126,6 @@ static void parse_xml_set_prop(openslide_t *osr, const char *xml, GError **err)
       "/ImageDocument/Metadata/Information/Image/ComponentBitCount/text()");
   data->pixel_bits = (int32_t) atol(pixel_bits);
 
-  //printf("debug parse xml(): pixel_bits = %d\n", data->pixel_bits);
   // in meter/pixel
   g_autofree char *mpp_x =
     _openslide_xml_xpath_get_string(ctx,
@@ -1294,7 +1294,7 @@ static bool zeiss_add_associated_image(openslide_t *osr, GError **err)
   struct associated_image_mapping *map = &known_associated_images[0];
   int64_t zisraw_offset;
 
-  while (map->czi_name != NULL) {
+  for ( ; map->czi_name; map++) {
     // read the outermost CZI to get offset to ZISRAWFILE
     zisraw_offset = locate_attachment_by_name(outer_data, map->czi_name, err);
     if (zisraw_offset == 0)
@@ -1303,8 +1303,6 @@ static bool zeiss_add_associated_image(openslide_t *osr, GError **err)
     data = g_slice_new0(struct zeiss_ops_data);
     data->filename = g_strdup(outer_data->filename);
     data->zisraw_offset = zisraw_offset;
-    //data->zisraw_offset = locate_attachment_by_name(outer_data, "Label", err);
-    //fprintf(stderr, "debug label zisraw_offset = %ld\n", data->zisraw_offset);
 
     // knowing offset to ZISRAWFILE, now parse the embeded CZI
     load_dir_position(data, err);
@@ -1313,9 +1311,7 @@ static bool zeiss_add_associated_image(openslide_t *osr, GError **err)
     struct czi_subblk *sb = (struct czi_subblk *)data->subblks->pdata[0];
     _add_associated_image(osr, data->filename, map->osr_name,
                           data->zisraw_offset, sb, err);
-    printf("debug zeiss_add_associated_image(): add %s\n", map->osr_name);
     destroy_ops_data(data);
-    map++;
   }
   return true;
 }
@@ -1353,7 +1349,6 @@ static bool zeiss_open(openslide_t *osr, const char *filename,
   init_levels(osr, err);
   init_range_grids(osr, err);
   zeiss_add_associated_image(osr, err);
-
   return true;
 }
 

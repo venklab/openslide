@@ -34,7 +34,7 @@ typedef struct decoded_img {
   uint32_t h;
   size_t size;
   uint32_t stride;
-  uint32_t pixel_size;
+  uint32_t pixel_bits;
 } decoded_img;
 
 static void decoded_img_free(struct decoded_img *p) {
@@ -45,10 +45,14 @@ static void decoded_img_free(struct decoded_img *p) {
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(decoded_img, decoded_img_free)
 
 bool _openslide_jxr_decode_buf(void *data, size_t datalen,
-                               struct decoded_img *dest, GError **err);
+                               int pixel_bits, struct decoded_img *dest,
+                               GError **err);
 
 bool _openslide_jxr_read(const char *filename, int64_t pos, int64_t jxr_len,
-                         struct decoded_img * dest, GError **err);
+                         int pixel_bits, struct decoded_img *dest,
+                         GError **err);
 
 bool convert_24bppbgr_to_cario24bpprgb(struct decoded_img *dest);
+bool convert_48bppbgr_to_cario24bpprgb(struct decoded_img *dest);
+bool convert_gray16_to_gray8(struct decoded_img *p, int pixel_bits);
 #endif

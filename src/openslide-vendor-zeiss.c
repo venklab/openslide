@@ -252,9 +252,7 @@ struct zeiss_ops_data {
   GPtrArray *subblks;
   GHashTable *grids;
   GHashTable *addr_subblks;
-
-  GHashTable *count_tile_width;
-  GHashTable *count_tile_height;
+  GHashTable *count_levels;
   void *unused;
 };
 
@@ -303,11 +301,8 @@ static void destroy_subblk(struct czi_subblk *p)
 static void destroy_ops_data(struct zeiss_ops_data *data)
 {
   g_free(data->filename);
-  if (data->count_tile_width)
-    g_hash_table_destroy(data->count_tile_width);
-
-  if (data->count_tile_height)
-    g_hash_table_destroy(data->count_tile_height);
+  if (data->count_levels)
+    g_hash_table_destroy(data->count_levels);
 
   if (data->grids)
     g_hash_table_destroy(data->grids);
@@ -579,7 +574,7 @@ static bool czi_uncompressed_read(const char *filename,
 
   dest->size = len;
   dest->data = g_slice_alloc(len);
-  printf("debug czi_uncompressed_read(): len = %d\n", len);
+  //printf("debug czi_uncompressed_read(): len = %ld\n", len);
 
   if (_openslide_fread(f, dest->data, (size_t) len) != (size_t) len) {
     g_set_error(err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_FAILED,
@@ -818,66 +813,17 @@ static void destroy_int64_key(void *p)
   g_free(p);
 }
 
-static void destroy_freq_count(void *p)
+static void count_levels(struct zeiss_ops_data *data, int64_t downsample)
 {
-  g_slice_free(struct freq_count, p);
-}
-
-static void destroy_wh_count_hashtable(void *p)
-{
-  g_hash_table_destroy((GHashTable *) p);
-}
-
-/* count occurrence of tile width and height for each level */
-static void count_tile_width_height(struct zeiss_ops_data *data,
-                                    int64_t downsample, int64_t w, int64_t h)
-{
-  struct freq_count *frq_w, *frq_h;
-  GHashTable *level_w, *level_h;
   int64_t *k;
+  void *unused;
 
-  // one hashtable for each level
-  level_w = g_hash_table_lookup(data->count_tile_width, &downsample);
-  if (!level_w) {
-    level_w = g_hash_table_new_full(g_int64_hash, g_int64_equal,
-                                    (GDestroyNotify) destroy_int64_key,
-                                    (GDestroyNotify) destroy_freq_count);
+  unused = g_hash_table_lookup(data->count_levels, &downsample);
+  if (!unused) {
     k = g_new(int64_t, 1);
     *k = downsample;
-    g_hash_table_insert(data->count_tile_width, k, level_w);
+    g_hash_table_insert(data->count_levels, k, NULL);
   }
-
-  level_h = g_hash_table_lookup(data->count_tile_height, &downsample);
-  if (!level_h) {
-    level_h = g_hash_table_new_full(g_int64_hash, g_int64_equal,
-                                    (GDestroyNotify) destroy_int64_key,
-                                    (GDestroyNotify) destroy_freq_count);
-    k = g_new(int64_t, 1);
-    *k = downsample;
-    g_hash_table_insert(data->count_tile_height, k, level_h);
-  }
-
-  // one struct freq_count for each tile width in this level
-  frq_w = g_hash_table_lookup(level_w, &w);
-  if (!frq_w) {
-    frq_w = g_slice_new0(struct freq_count);
-    k = g_new(int64_t, 1);
-    *k = w;
-    g_hash_table_insert(level_w, k, frq_w);
-    frq_w->value = w;
-  }
-
-  frq_h = g_hash_table_lookup(level_h, &h);
-  if (!frq_h) {
-    frq_h = g_slice_new0(struct freq_count);
-    k = g_new(int64_t, 1);
-    *k = h;
-    g_hash_table_insert(level_h, k, frq_h);
-    frq_h->value = h;
-  }
-
-  frq_w->count++;
-  frq_h->count++;
 }
 
 static void print_ca(struct czi_address *ca) {
@@ -953,47 +899,6 @@ static gint cmp_int64(gpointer a, gpointer b) {
   return (*x < *y) ?  -1 : 1;
 }
 
-static void iter_common(void *k G_GNUC_UNUSED, void *value, void *user_data)
-{
-  struct freq_count *frq = (struct freq_count *) value;
-  struct freq_count *result = (struct freq_count *) user_data;
-
-  if (frq->count > result->count) {
-    result->count = frq->count;
-    result->value = frq->value;
-  }
-}
-
-static inline int64_t find_most_common(GHashTable *ht, int64_t downsample)
-{
-  GHashTable *level;
-  struct freq_count cnt = {.count = 0};
-
-  //fprintf(stderr, "find_most_common: ds %ld level ht has %d keys\n",
-  //    downsample, g_hash_table_size(ht));
-  level = g_hash_table_lookup(ht, &downsample);
-  if (!level) {
-    fprintf(stderr, "find_most_common: ds %ld level is NULL\n", downsample);
-    return 1;
-  }
-
-  g_hash_table_foreach(level, (GHFunc)iter_common, &cnt);
-  //printf("debug: tw th %ld has %ld tiles\n", cnt.value, cnt.count);
-  return cnt.value;
-}
-
-static int64_t find_most_common_width(struct zeiss_ops_data *data,
-                                      int64_t downsample)
-{
-  return find_most_common(data->count_tile_width, downsample);
-}
-
-static int64_t find_most_common_height(struct zeiss_ops_data *data,
-                                       int64_t downsample)
-{
-  return find_most_common(data->count_tile_height, downsample);
-}
-
 static bool init_levels(openslide_t *osr, GError **err G_GNUC_UNUSED)
 {
   struct zeiss_ops_data *data = osr->data;
@@ -1005,23 +910,23 @@ static bool init_levels(openslide_t *osr, GError **err G_GNUC_UNUSED)
 
   for (guint i = 0; i < subblks->len; i++) {
     b = subblks->pdata[i];
-    count_tile_width_height(data, b->downsample_i, b->tw, b->th);
+    count_levels(data, b->downsample_i);
   }
 
-  GList *downsamples = g_hash_table_get_keys(data->count_tile_width);
+  GList *downsamples = g_hash_table_get_keys(data->count_levels);
   GList *p = g_list_sort(downsamples, (GCompareFunc) cmp_int64);
   downsamples = p;
 
   while (p) {
-    //printf("debug: downsample_i = %ld\n", *((int64_t *) p->data));
+    printf("debug: downsample_i = %ld\n", *((int64_t *) p->data));
     downsample_i = *((int64_t *) p->data);
     l = g_slice_new0(struct level);
     l->base.downsample = (double) downsample_i;
     l->base.w = data->w / l->base.downsample;
     l->base.h = data->h / l->base.downsample;
     l->downsample_i = downsample_i;
-    l->base.tile_w = find_most_common_width(data, downsample_i);
-    l->base.tile_h = find_most_common_height(data, downsample_i);
+    l->base.tile_w = 256;
+    l->base.tile_h = 256;
 
     g_ptr_array_add(levels, l);
     p = p->next;
@@ -1435,14 +1340,9 @@ static bool zeiss_open(openslide_t *osr, const char *filename,
   data->offset_x = G_MAXINT32;
   data->offset_y = G_MAXINT32;
   data->filename = g_strdup(filename);
-  data->count_tile_width =
+  data->count_levels =
     g_hash_table_new_full(g_int64_hash, g_int64_equal,
-                          (GDestroyNotify) destroy_int64_key,
-                          (GDestroyNotify) destroy_wh_count_hashtable);
-  data->count_tile_height =
-    g_hash_table_new_full(g_int64_hash, g_int64_equal,
-                          (GDestroyNotify) destroy_int64_key,
-                          (GDestroyNotify) destroy_wh_count_hashtable);
+                          (GDestroyNotify) destroy_int64_key, NULL);
   load_dir_position(data, NULL);
   read_subblk_dir(data, NULL);
   adjust_coordinate_origin(data, NULL);

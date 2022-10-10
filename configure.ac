@@ -61,7 +61,6 @@ PKG_CHECK_MODULES(LIBJPEG, [libjpeg], [], [
 ])
 
 PKG_CHECK_MODULES(OPENJPEG, [libopenjp2 >= 2.1.0])
-PKG_CHECK_MODULES(LIBJXR, [libjxr])
 PKG_CHECK_MODULES(LIBTIFF, [libtiff-4])
 PKG_CHECK_MODULES(GLIB2, [glib-2.0 >= 2.56, gthread-2.0, gio-2.0, gobject-2.0])
 PKG_CHECK_MODULES(CAIRO, [cairo >= 1.2])
@@ -74,6 +73,11 @@ PKG_CHECK_MODULES(SQLITE3, [sqlite3 >= 3.14])
 PKG_CHECK_MODULES(VALGRIND, [valgrind], [
   AC_DEFINE([HAVE_VALGRIND], [1], [Define to 1 if you have the Valgrind headers.])
 ], [:])
+
+PKG_CHECK_MODULES(LIBJXR, [libjxr], [HAVE_LIBJXR=1], [HAVE_LIBJXR=0])
+AM_CONDITIONAL([USE_LIBJXR], [test "$HAVE_LIBJXR" -eq 1])
+AS_IF([test "$HAVE_LIBJXR" -eq 1], [
+  AC_DEFINE([HAVE_LIBJXR], [1], [Define to 1 if have jxr headers.])])
 
 gl_VISIBILITY
 

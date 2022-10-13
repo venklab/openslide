@@ -44,8 +44,6 @@ AC_DEFINE_UNQUOTED([SUFFIXED_VERSION], ["$SUFFIXED_VERSION"],
                    [Define to the package version string including any suffix.])
 AC_SUBST([SUFFIXED_VERSION])
 
-export PKG_CONFIG_PATH=".:$PKG_CONFIG_PATH"
-
 # libraries
 AC_SEARCH_LIBS([floor], [m],, AC_MSG_FAILURE([cannot find math library]))
 
@@ -69,15 +67,37 @@ PKG_CHECK_MODULES(GDKPIXBUF, [gdk-pixbuf-2.0 >= 2.14])
 PKG_CHECK_MODULES(LIBXML2, [libxml-2.0])
 PKG_CHECK_MODULES(SQLITE3, [sqlite3 >= 3.14])
 
+dnl Workaround for CentOS7, Debian < Bookworm, and Ubuntu < 22.04LTS. They
+dnl miss libjxr.pc
+AC_MSG_CHECKING([for JPEG XR])
+dnl Debian, Ubuntu
+if test -f /usr/lib/i386-linux-gnu/libjxrglue.so; then
+    LIBJXR_LIBS="-L/usr/lib/i386-linux-gnu/ -ljpegxr -ljxrglue"
+fi
+if test -f /usr/lib/x86_64-linux-gnu/libjxrglue.so; then
+    LIBJXR_LIBS="-L/usr/lib/x86_64-linux-gnu/ -ljpegxr -ljxrglue"
+fi
+dnl CentOS
+if test -f /usr/lib64/libjxrglue.so; then
+    LIBJXR_LIBS="-L/usr/lib64/ -ljpegxr -ljxrglue"
+fi
+if test -f /usr/include/jxrlib/JXRGlue.h; then
+    LIBJXR_CFLAGS="-I/usr/include/jxrlib/ -D__ANSI__ -DDISABLE_PERF_MEASUREMENT"
+fi
+if test "x$LIBJXR_CFLAGS" != x && test "x$LIBJXR_LIBS" != x; then
+    AM_CONDITIONAL([WITH_LIBJXR], [true])
+    AC_MSG_RESULT([yes])
+else
+    AM_CONDITIONAL([WITH_LIBJXR], [false])
+    AC_MSG_RESULT([no])
+fi
+AC_SUBST([LIBJXR_CFLAGS])
+AC_SUBST([LIBJXR_LIBS])
+
 # optional
 PKG_CHECK_MODULES(VALGRIND, [valgrind], [
   AC_DEFINE([HAVE_VALGRIND], [1], [Define to 1 if you have the Valgrind headers.])
 ], [:])
-
-PKG_CHECK_MODULES(LIBJXR, [libjxr], [HAVE_LIBJXR=1], [HAVE_LIBJXR=0])
-AM_CONDITIONAL([USE_LIBJXR], [test "$HAVE_LIBJXR" -eq 1])
-AS_IF([test "$HAVE_LIBJXR" -eq 1], [
-  AC_DEFINE([HAVE_LIBJXR], [1], [Define to 1 if have jxr headers.])])
 
 gl_VISIBILITY
 

@@ -65,7 +65,7 @@ PKG_CHECK_MODULES(CAIRO, [cairo >= 1.2])
 PKG_CHECK_MODULES(LIBPNG, [libpng > 1.2])
 PKG_CHECK_MODULES(GDKPIXBUF, [gdk-pixbuf-2.0 >= 2.14])
 PKG_CHECK_MODULES(LIBXML2, [libxml-2.0])
-PKG_CHECK_MODULES(SQLITE3, [sqlite3 >= 3.14])
+PKG_CHECK_MODULES(SQLITE3, [sqlite3 >= 3.6])
 
 dnl Workaround for CentOS7, Debian < Bookworm, and Ubuntu < 22.04LTS. They
 dnl miss libjxr.pc
@@ -224,8 +224,23 @@ AS_CASE([$host],
   ]
 )
 
+dnl ==========================================================================
+dnl define PKG_CHECK_VAR for old pkg-config < 0.28
+m4_ifndef([PKG_CHECK_VAR], [
+AC_DEFUN([PKG_CHECK_VAR],
+[AC_REQUIRE([PKG_PROG_PKG_CONFIG])
+AC_ARG_VAR([$1], [value of $3 for $2, overriding pkg-config])
+_PKG_CONFIG([$1], [variable="][$3]["], [$2])
+AS_VAR_COPY([$1], [pkg_cv_][$1])
+
+AS_VAR_IF([$1], [""], [$5], [$4])
+])
+])
+dnl ==========================================================================
+
+
 # Path prefix for glib Valgrind suppressions
-PKG_CHECK_VAR(GLIB2_DATADIR, [gio-2.0], datadir)
+PKG_CHECK_VAR(GLIB2_PREFIX, [gio-2.0], prefix)
 
 # Compiler warnings
 WARN_CFLAGS="-Wall -Wextra -Wstrict-prototypes -Wmissing-prototypes -Wmissing-declarations -Wnested-externs"

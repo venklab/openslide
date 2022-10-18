@@ -66,33 +66,36 @@ PKG_CHECK_MODULES(LIBPNG, [libpng > 1.2])
 PKG_CHECK_MODULES(GDKPIXBUF, [gdk-pixbuf-2.0 >= 2.14])
 PKG_CHECK_MODULES(LIBXML2, [libxml-2.0])
 PKG_CHECK_MODULES(SQLITE3, [sqlite3 >= 3.14])
-
-dnl Workaround for CentOS7, Debian < Bookworm, and Ubuntu < 22.04LTS. They
-dnl miss libjxr.pc
-AC_MSG_CHECKING([for JPEG XR])
-dnl Debian, Ubuntu
-if test -f /usr/lib/i386-linux-gnu/libjxrglue.so; then
-    LIBJXR_LIBS="-L/usr/lib/i386-linux-gnu/ -ljpegxr -ljxrglue"
-fi
-if test -f /usr/lib/x86_64-linux-gnu/libjxrglue.so; then
-    LIBJXR_LIBS="-L/usr/lib/x86_64-linux-gnu/ -ljpegxr -ljxrglue"
-fi
-dnl CentOS
-if test -f /usr/lib64/libjxrglue.so; then
-    LIBJXR_LIBS="-L/usr/lib64/ -ljpegxr -ljxrglue"
-fi
-if test -f /usr/include/jxrlib/JXRGlue.h; then
+PKG_CHECK_MODULES(LIBJXR, [libjxr], [FOUND_LIBJXR=1], [FOUND_LIBJXR=0])
+if test "$FOUND_LIBJXR" -eq 0; then
+    AC_MSG_CHECKING([for LIBJXR without pkg-config])
+    dnl Workaround for RHEL8, Debian < Bookworm, and Ubuntu < 22.04LTS. They
+    dnl miss pkg-config file.
     LIBJXR_CFLAGS="-I/usr/include/jxrlib/ -D__ANSI__ -DDISABLE_PERF_MEASUREMENT"
+    dnl Debian
+    if test -f /usr/lib/i386-linux-gnu/libjxrglue.so; then
+        LIBJXR_LIBS="-L/usr/lib/i386-linux-gnu/ -ljpegxr -ljxrglue"
+    fi
+    if test -f /usr/lib/x86_64-linux-gnu/libjxrglue.so; then
+        LIBJXR_LIBS="-L/usr/lib/x86_64-linux-gnu/ -ljpegxr -ljxrglue"
+    fi
+    dnl RHEL
+    if test -f /usr/lib64/libjxrglue.so; then
+        LIBJXR_LIBS="-L/usr/lib64/ -ljpegxr -ljxrglue"
+    fi
+
+    if test "x$LIBJXR_CFLAGS" != x && test "x$LIBJXR_LIBS" != x; then
+        FOUND_LIBJXR=1
+        AC_MSG_RESULT([yes])
+        AC_SUBST([LIBJXR_CFLAGS])
+        AC_SUBST([LIBJXR_LIBS])
+    else
+        AC_MSG_RESULT([no])
+    fi
 fi
-if test "x$LIBJXR_CFLAGS" != x && test "x$LIBJXR_LIBS" != x; then
-    AM_CONDITIONAL([WITH_LIBJXR], [true])
-    AC_MSG_RESULT([yes])
-else
-    AM_CONDITIONAL([WITH_LIBJXR], [false])
-    AC_MSG_RESULT([no])
-fi
-AC_SUBST([LIBJXR_CFLAGS])
-AC_SUBST([LIBJXR_LIBS])
+AM_CONDITIONAL([WITH_LIBJXR], [test "$FOUND_LIBJXR" -eq 1])
+AS_IF([test "$FOUND_LIBJXR" -eq 1],
+      [AC_DEFINE([HAVE_LIBJXR], [1], [Define to 1 if have jxr headers.])])
 
 # optional
 PKG_CHECK_MODULES(VALGRIND, [valgrind], [

@@ -1013,12 +1013,16 @@ static bool parse_xml_set_prop(openslide_t *osr, const char *xml,
                     Objectives
                         Objective
                             NominalMagnification  (objective-power)
-              Scaling
-                  Items
-                      <Distance Id="X">  (mpp X)
-                          Value  (3.4443237544526617E-07, in meter)
-                      <Distance Id="Y">  (mpp Y)
-                          Value
+            Scaling
+                Items
+                    <Distance Id="X">  (mpp X)
+                        Value  (3.4443237544526617E-07, in meter)
+                    <Distance Id="Y">  (mpp Y)
+                        Value
+            DisplaySetting
+                Channels
+                    Channel
+                        Gamma
   */
   g_autoptr(xmlXPathContext) ctx = _openslide_xml_xpath_create(doc);
 
@@ -1057,6 +1061,15 @@ static bool parse_xml_set_prop(openslide_t *osr, const char *xml,
   d = _openslide_parse_double(mpp_y);
   g_ascii_dtostr(buf, sizeof(buf), d * 1000000.0);
   set_prop(osr, OPENSLIDE_PROPERTY_NAME_MPP_Y, buf);
+
+  g_autofree char *gamma =
+    _openslide_xml_xpath_get_string(ctx,
+      "/ImageDocument/Metadata/DisplaySetting/Channels/Channel/Gamma/text()");
+  if (gamma) {
+    d = _openslide_parse_double(gamma);
+    g_ascii_dtostr(buf, sizeof(buf), d);
+    set_prop(osr, "zeiss.display_gamma", buf);
+  }
 
   g_autofree char *obj =
     _openslide_xml_xpath_get_string(ctx,

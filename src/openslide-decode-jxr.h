@@ -52,7 +52,7 @@ bool _openslide_jxr_read(const char *filename, int64_t pos, int64_t jxr_len,
                          int pixel_real_bits, struct decoded_img *dst,
                          GError **err);
 
-bool convert_24bppbgr_to_cario24bpprgb(struct decoded_img *dst);
-bool convert_48bppbgr_to_cario24bpprgb(struct decoded_img *dst);
+bool convert_24bppbgr_to_cairo24bpprgb(struct decoded_img *dst);
+bool convert_48bppbgr_to_cairo24bpprgb(struct decoded_img *dst);
 bool convert_gray16_to_gray8(struct decoded_img *p, int pixel_real_bits);
 #endif

@@ -39,9 +39,9 @@
    ((uint32_t)((p)[5]) << 16))
 
 enum remixer {
-  RMX_CARIO24RGB,
+  RMX_CAIRO24RGB,
   RMX_GRAY16TOGRAY8,
-  RMX_RGB48TOCARIO24RGB,
+  RMX_RGB48TOCAIRO24RGB,
 };
 
 static struct wmp_err_msg {
@@ -94,7 +94,7 @@ static guint get_bits_per_pixel(const PKPixelFormatGUID *pixel_format)
 /* GUID_PKPixelFormat24bppBGR has 24bits per pixel. CAIRO_FORMAT_RGB24 has
  * 32bits, with the upper 8 bits unused
  */
-bool convert_24bppbgr_to_cario24bpprgb(struct decoded_img *p)
+bool convert_24bppbgr_to_cairo24bpprgb(struct decoded_img *p)
 {
   size_t new_size = p->w * p->h * 4;
   uint32_t *buf = g_slice_alloc(new_size);
@@ -114,7 +114,7 @@ bool convert_24bppbgr_to_cario24bpprgb(struct decoded_img *p)
   return true;
 }
 
-bool convert_48bppbgr_to_cario24bpprgb(struct decoded_img *p)
+bool convert_48bppbgr_to_cairo24bpprgb(struct decoded_img *p)
 {
   size_t new_size = p->w * p->h * 4;
   uint32_t *buf = g_slice_alloc(new_size);
@@ -181,7 +181,7 @@ bool _openslide_jxr_decode_buf(void *data, size_t datalen,
 
   // GUID_PKPixelFormat32bppRGBA is not supported by converter
   PKPixelFormatGUID fmt_out = GUID_PKPixelFormat24bppBGR;
-  remixer = RMX_CARIO24RGB;
+  remixer = RMX_CAIRO24RGB;
   if (IsEqualGUID(&fmt, &GUID_PKPixelFormat8bppGray)) {
     //fprintf(stderr, "jxr fmt is GUID_PKPixelFormat8bppGray\n");
     fmt_out = GUID_PKPixelFormat8bppGray;
@@ -192,11 +192,11 @@ bool _openslide_jxr_decode_buf(void *data, size_t datalen,
   } else if (IsEqualGUID(&fmt, &GUID_PKPixelFormat24bppBGR)) {
     //fprintf(stderr, "jxr fmt is GUID_PKPixelFormat24bppBGR\n");
     fmt_out = GUID_PKPixelFormat24bppBGR;
-    remixer = RMX_CARIO24RGB;
+    remixer = RMX_CAIRO24RGB;
   } else if (IsEqualGUID(&fmt, &GUID_PKPixelFormat48bppRGB)) {
     fprintf(stderr, "jxr fmt is GUID_PKPixelFormat48bppRGB\n");
     fmt_out = GUID_PKPixelFormat48bppRGB;
-    remixer = RMX_RGB48TOCARIO24RGB;
+    remixer = RMX_RGB48TOCAIRO24RGB;
   } else {
     printf("Unsupported jxr fmt, try decode with GUID_PKPixelFormat24bppBGR\n");
   }
@@ -215,11 +215,11 @@ bool _openslide_jxr_decode_buf(void *data, size_t datalen,
   Call(pConverter->Copy(pConverter, &rect, dst->data, dst->stride));
 
   switch (remixer) {
-  case RMX_CARIO24RGB:
-    convert_24bppbgr_to_cario24bpprgb(dst);
+  case RMX_CAIRO24RGB:
+    convert_24bppbgr_to_cairo24bpprgb(dst);
     break;
-  case RMX_RGB48TOCARIO24RGB:
-    convert_48bppbgr_to_cario24bpprgb(dst);
+  case RMX_RGB48TOCAIRO24RGB:
+    convert_48bppbgr_to_cairo24bpprgb(dst);
     break;
   case RMX_GRAY16TOGRAY8:
     convert_gray16_to_gray8(dst, pixel_real_bits);

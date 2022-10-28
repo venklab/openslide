@@ -94,7 +94,7 @@ static guint get_bits_per_pixel(const PKPixelFormatGUID *pixel_format)
 /* GUID_PKPixelFormat24bppBGR has 24bits per pixel. CAIRO_FORMAT_RGB24 has
  * 32bits, with the upper 8 bits unused
  */
-bool convert_24bppbgr_to_cairo24bpprgb(struct decoded_img *p)
+bool convert_24bppbgr_to_cairo24bpprgb(struct jxr_decoded *p)
 {
   size_t new_size = p->w * p->h * 4;
   uint32_t *buf = g_slice_alloc(new_size);
@@ -114,7 +114,7 @@ bool convert_24bppbgr_to_cairo24bpprgb(struct decoded_img *p)
   return true;
 }
 
-bool convert_48bppbgr_to_cairo24bpprgb(struct decoded_img *p)
+bool convert_48bppbgr_to_cairo24bpprgb(struct jxr_decoded *p)
 {
   size_t new_size = p->w * p->h * 4;
   uint32_t *buf = g_slice_alloc(new_size);
@@ -135,7 +135,7 @@ bool convert_48bppbgr_to_cairo24bpprgb(struct decoded_img *p)
 }
 
 /* image may use less than 16bits, for example Zeiss may use 14bits or less */
-bool convert_gray16_to_gray8(struct decoded_img *p, int pixel_real_bits)
+bool convert_gray16_to_gray8(struct jxr_decoded *p, int pixel_real_bits)
 {
   size_t new_size = p->w * p->h;
   uint8_t *buf = g_slice_alloc(new_size);
@@ -160,7 +160,7 @@ bool convert_gray16_to_gray8(struct decoded_img *p, int pixel_real_bits)
  * are used in a typical Zeiss AxioScan7 GRAY16 image.
  */
 bool _openslide_jxr_decode_buf(void *data, size_t datalen,
-                               int pixel_real_bits, struct decoded_img *dst,
+                               int pixel_real_bits, struct jxr_decoded *dst,
                                GError **unused G_GNUC_UNUSED)
 {
   struct WMPStream *pStream = NULL;
@@ -238,7 +238,7 @@ Cleanup:
  * @pos and @len is the start and length of encoded data
  * A CZI file has many tiles encoded in JPEG XR */
 bool _openslide_jxr_read(const char *filename, int64_t pos, int64_t len,
-                         int pixel_real_bits, struct decoded_img *dst,
+                         int pixel_real_bits, struct jxr_decoded *dst,
                          GError **err)
 {
   g_autoptr(_openslide_file) f = _openslide_fopen(filename, err);

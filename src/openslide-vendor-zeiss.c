@@ -18,8 +18,6 @@
  *  License along with OpenSlide. If not, see
  *  <http://www.gnu.org/licenses/>.
  *
- * Add Zeiss czi support. Wei Chen <chenw1@uthscsa.edu>
- *
  */
 #include <config.h>
 
@@ -243,6 +241,15 @@ enum z_attach_content_file_type {
   ATT_JPG,
 };
 
+// for finding location of each region(scene in CZI's term) and pyramid level
+struct z_region {
+  int64_t x1;
+  int64_t y1;
+  int64_t x2;
+  int64_t y2;
+  int64_t max_downsample;
+};
+
 struct zeiss_ops_data {
   // offset to ZISRAWFILE, one for each file, usually 0. CZI file is like
   // Russian doll, it can embed other CZI files. Non-zero value is the
@@ -253,6 +260,7 @@ struct zeiss_ops_data {
   int64_t subblk_dir_pos;
   int64_t meta_pos;
   int64_t att_dir_pos;
+  int64_t common_downsample;
   int32_t nsubblk;  // total number of subblocks
   int32_t w;
   int32_t h;
@@ -261,6 +269,7 @@ struct zeiss_ops_data {
   int32_t offset_x;
   int32_t offset_y;
   GPtrArray *subblks;
+  GPtrArray *regions;
   GHashTable *grids;
   GHashTable *addr_subblks;
   GHashTable *count_levels;
@@ -272,38 +281,33 @@ struct level {
   int32_t compression;
 };
 
-static void destroy(openslide_t *osr);
-static bool paint_region(openslide_t *osr, cairo_t *cr, int64_t x, int64_t y,
-                         struct _openslide_level *level, int32_t w, int32_t h,
-                         GError **err);
-
-static const struct _openslide_ops zeiss_ops = {
-  .paint_region = paint_region,
-  .destroy = destroy,
-};
-
 static void destroy_level(struct level *l) {
   g_slice_free(struct level, l);
 }
 
-static void destroy_subblk(struct czi_subblk *p)
-{
+static void destroy_subblk(struct czi_subblk *p) {
   g_slice_free(struct czi_subblk, p);
 }
 
-static void destroy_ops_data(struct zeiss_ops_data *data)
-{
+static void destroy_region(struct z_region *p) {
+  g_slice_free(struct z_region, p);
+}
+
+static void destroy_ops_data(struct zeiss_ops_data *data) {
   g_free(data->filename);
-  if (data->count_levels)
+  if (data->count_levels) {
     g_hash_table_destroy(data->count_levels);
+  }
 
   if (data->addr_subblks)
     g_hash_table_destroy(data->addr_subblks);
 
-  if (data->grids)
+  if (data->grids) {
     g_hash_table_destroy(data->grids);
+  }
 
   g_ptr_array_free(data->subblks, TRUE);
+  g_ptr_array_free(data->regions, TRUE);
   g_slice_free(struct zeiss_ops_data, data);
 }
 
@@ -321,8 +325,7 @@ static bool paint_region(openslide_t *osr, cairo_t *cr,
                           int64_t x, int64_t y,
                           struct _openslide_level *level,
                           int32_t w, int32_t h,
-                          GError **err)
-{
+                          GError **err) {
   struct zeiss_ops_data *data = osr->data;
   struct level *l = (struct level *) level;
   int64_t ds = (int64_t) level->downsample;
@@ -340,6 +343,11 @@ static bool paint_region(openslide_t *osr, cairo_t *cr,
   return true;
 }
 
+static const struct _openslide_ops zeiss_ops = {
+  .paint_region = paint_region,
+  .destroy = destroy,
+};
+
 static bool zeiss_detect(const char *filename,
                          struct _openslide_tifflike *tl, GError **err) {
   // reject TIFFs
@@ -350,8 +358,9 @@ static bool zeiss_detect(const char *filename,
   }
 
   g_autoptr(_openslide_file) f = _openslide_fopen(filename, err);
-  if (!f)
+  if (!f) {
     return false;
+  }
 
   // string ZISRAWFILE occurs once per file, at positon 0
   char sid[CZI_SEG_ID_LEN];
@@ -370,8 +379,7 @@ static bool zeiss_detect(const char *filename,
 }
 
 static void read_dim_entry(struct zisraw_dim_entry_dv *p,
-                           struct czi_subblk *sb)
-{
+                           struct czi_subblk *sb) {
   int start = GINT32_FROM_LE(p->start);
   int size = GINT32_FROM_LE(p->size);
   int stored_size = GINT32_FROM_LE(p->stored_size);
@@ -399,8 +407,7 @@ static void read_dim_entry(struct zisraw_dim_entry_dv *p,
   }
 }
 
-static int read_dir_entry(GPtrArray *subblks, char *p)
-{
+static int read_dir_entry(GPtrArray *subblks, char *p) {
   struct czi_subblk *sb = g_slice_new0(struct czi_subblk);
   struct zisraw_dir_entry_dv *dv;
   char *b = p;
@@ -427,8 +434,7 @@ static int read_dir_entry(GPtrArray *subblks, char *p)
 }
 
 /* read all data subblocks info (x, y, w, h etc.) from subblock directory */
-static bool read_subblk_dir(struct zeiss_ops_data *data, GError **err)
-{
+static bool read_subblk_dir(struct zeiss_ops_data *data, GError **err) {
   struct zisraw_subblk_dir_hdr *hdr;
   char buf[512];
   char *p;
@@ -438,8 +444,9 @@ static bool read_subblk_dir(struct zeiss_ops_data *data, GError **err)
 
   data->subblks = g_ptr_array_new_full(64, (GDestroyNotify) destroy_subblk);
   g_autoptr(_openslide_file) f = _openslide_fopen(data->filename, err);
-  if (!f)
+  if (!f) {
     return false;
+  }
 
   if (!_openslide_fseek(f, data->zisraw_offset + data->subblk_dir_pos,
                         SEEK_SET, err)) {
@@ -487,19 +494,19 @@ static bool read_subblk_dir(struct zeiss_ops_data *data, GError **err)
 /* the topleft-most tile has none-zero (x, y), use its x,y as offset to adjust
  * x,y of other tiles.
  */
-static bool adjust_coordinate_origin(struct zeiss_ops_data *data,
-                                     GError **err G_GNUC_UNUSED)
-{
+static void adjust_coordinate_origin(struct zeiss_ops_data *data) {
   GPtrArray *subblks = data->subblks;
   struct czi_subblk *b;
 
   for (guint i = 0; i < subblks->len; i++) {
     b = subblks->pdata[i];
-    if (b->x1 < data->offset_x)
+    if (b->x1 < data->offset_x) {
       data->offset_x = b->x1;
+    }
 
-    if (b->y1 < data->offset_y)
+    if (b->y1 < data->offset_y) {
       data->offset_y = b->y1;
+    }
   }
 
   for (guint i = 0; i < subblks->len; i++) {
@@ -507,18 +514,20 @@ static bool adjust_coordinate_origin(struct zeiss_ops_data *data,
     b->x1 -= data->offset_x;
     b->y1 -= data->offset_y;
   }
-
-  return true;
 }
 
+/* the uncompressed data in CZI also uses JXR pixel types such as BGR24 or
+ * BGR48, thus use struct jxr_decoded for exchanging buffer
+ */
 static bool czi_uncompressed_read(const char *filename,
                                   int64_t pos, int64_t len,
                                   int32_t pixel_type, int32_t pixel_real_bits,
                                   struct decoded_img *dst, GError **err)
 {
   g_autoptr(_openslide_file) f = _openslide_fopen(filename, err);
-  if (!f)
+  if (!f) {
     return false;
+  }
 
   if (!_openslide_fseek(f, pos, SEEK_SET, err)) {
     g_prefix_error(err, "Couldn't seek to jxr pixel data");
@@ -719,11 +728,6 @@ static void finish_adding_tiles(void *key G_GNUC_UNUSED, void *value,
   _openslide_grid_range_finish_adding_tiles(grid);
 }
 
-static void destroy_int64_key(void *p)
-{
-  g_free(p);
-}
-
 static void count_levels(struct zeiss_ops_data *data, int64_t downsample)
 {
   int64_t *k;
@@ -744,6 +748,11 @@ static void add_czi_address_to_grid(gpointer k G_GNUC_UNUSED,
   struct czi_address *addr = v;
   struct zeiss_ops_data *data = ops_data;
 
+  // make sure all scenes have same levels
+  if (addr->downsample > data->common_downsample) {
+    return;
+  }
+
   grid = g_hash_table_lookup(data->grids, &addr->downsample);
   if (!grid)
     return;
@@ -754,15 +763,14 @@ static void add_czi_address_to_grid(gpointer k G_GNUC_UNUSED,
                                  (double) addr->tw, (double) addr->th, addr);
 }
 
-static bool init_range_grids(openslide_t *osr, GError **err G_GNUC_UNUSED)
-{
+static void init_range_grids(openslide_t *osr) {
   struct zeiss_ops_data *data = osr->data;
   struct _openslide_grid *grid;
   struct level *l;
   int64_t *k;
 
   data->grids = g_hash_table_new_full(g_int64_hash, g_int64_equal,
-                                      (GDestroyNotify) destroy_int64_key,
+                                      (GDestroyNotify) g_free,
                                       (GDestroyNotify) _openslide_grid_destroy);
   for (int i = 0; i < osr->level_count; i++) {
     l = (struct level *) osr->levels[i];
@@ -777,20 +785,38 @@ static bool init_range_grids(openslide_t *osr, GError **err G_GNUC_UNUSED)
   g_hash_table_foreach(data->addr_subblks,
                        (GHFunc) add_czi_address_to_grid, data);
   g_hash_table_foreach(data->grids, (GHFunc)finish_adding_tiles, NULL);
-  return true;
 }
 
 static gint cmp_int64(gpointer a, gpointer b) {
   int64_t *x = (int64_t *)a;
   int64_t *y = (int64_t *)b;
 
-  if (*x == *y)
+  if (*x == *y) {
     return 0;
+  }
   return (*x < *y) ?  -1 : 1;
 }
 
-static bool init_levels(openslide_t *osr, GError **err G_GNUC_UNUSED)
-{
+/* Scenes on a slide may have different sizes and pyramid levels. For example,
+ * rat kidney is likely to have more levels than a mouse kidney on the same
+ * slide. Find the maximum downsample value available on all scenes and use it
+ * to set the total levels. It helps deepzoom to show all sections on a slide
+ * at max zoom out.
+ */
+static int64_t get_common_downsample(struct zeiss_ops_data *data) {
+  struct z_region *r;
+  int64_t downsample = INT64_MAX;
+
+  for (int i = 0; i < data->scene; i++) {
+    r = data->regions->pdata[i];
+    if (downsample > r->max_downsample) {
+      downsample = r->max_downsample;
+    }
+  }
+  return downsample;
+}
+
+static void init_levels(openslide_t *osr) {
   struct zeiss_ops_data *data = osr->data;
   struct czi_subblk *b;
   struct level *l;
@@ -807,8 +833,13 @@ static bool init_levels(openslide_t *osr, GError **err G_GNUC_UNUSED)
   GList *p = g_list_sort(downsamples, (GCompareFunc) cmp_int64);
   downsamples = p;
 
+  data->common_downsample = get_common_downsample(data);
   while (p) {
     downsample_i = *((int64_t *) p->data);
+    if (downsample_i > data->common_downsample) {
+      break;
+    }
+
     l = g_slice_new0(struct level);
     l->base.downsample = (double) downsample_i;
     l->base.w = data->w / l->base.downsample;
@@ -825,18 +856,17 @@ static bool init_levels(openslide_t *osr, GError **err G_GNUC_UNUSED)
   osr->level_count = levels->len;
   osr->levels = (struct _openslide_level **) g_ptr_array_free(levels, false);
   g_list_free(downsamples);
-  return true;
 }
 
 /* locate offset to metadata, to subblock and attachment directory */
-static bool load_dir_position(struct zeiss_ops_data *data, GError **err)
-{
+static bool load_dir_position(struct zeiss_ops_data *data, GError **err) {
   struct zisraw_data_file_hdr *hdr;
   char buf[512];
 
   g_autoptr(_openslide_file) f = _openslide_fopen(data->filename, err);
-  if (!f)
+  if (!f) {
     return false;
+  }
 
   if (!_openslide_fseek(f, data->zisraw_offset, SEEK_SET, err)) {
     g_prefix_error(err, "Couldn't seek to FileHeaderSegment start: ");
@@ -931,17 +961,17 @@ static bool combine_subblks_from_multichannels(struct zeiss_ops_data *data,
   return true;
 }
 
-static void set_prop(openslide_t *osr, const char *name, const char *value)
-{
-  if (value)
+static void set_prop(openslide_t *osr, const char *name, const char *value) {
+  if (value) {
     g_hash_table_insert(osr->properties, g_strdup(name), g_strdup(value));
+  }
 }
 
 /* parse XML and set standard openslide properties. Also set width, height in
  * ops_data
  */
-static void parse_xml_set_prop(openslide_t *osr, const char *xml, GError **err)
-{
+static bool parse_xml_set_prop(openslide_t *osr, const char *xml,
+                               GError **err) {
   struct zeiss_ops_data *data = osr->data;
   double d;
   char buf[G_ASCII_DTOSTR_BUF_SIZE];
@@ -949,7 +979,7 @@ static void parse_xml_set_prop(openslide_t *osr, const char *xml, GError **err)
   g_autoptr(xmlDoc) doc = _openslide_xml_parse(xml, err);
   if (doc == NULL) {
     g_printerr("Error: cannot parse XML to xmlDoc\n");
-    return;
+    return false;
   }
 
   /* part of XML structure:
@@ -1034,6 +1064,7 @@ static void parse_xml_set_prop(openslide_t *osr, const char *xml, GError **err)
   set_prop(osr, OPENSLIDE_PROPERTY_NAME_OBJECTIVE_POWER, obj);
 
   set_prop(osr, OPENSLIDE_PROPERTY_NAME_VENDOR, "zeiss");
+  return true;
 }
 
 static int32_t parse_xml_get_pixel_real_bits(const char *xml, GError **err)
@@ -1051,16 +1082,16 @@ static int32_t parse_xml_get_pixel_real_bits(const char *xml, GError **err)
   return (int32_t) atol(pixel_bits);
 }
 
-static char *read_czi_meta_xml(struct zeiss_ops_data *data, GError **err)
-{
+static char *read_czi_meta_xml(struct zeiss_ops_data *data, GError **err) {
   struct zisraw_meta_hdr *hdr;
   size_t len;
   char buf[512];
   g_autofree char *xml = NULL;
 
   g_autoptr(_openslide_file) f = _openslide_fopen(data->filename, err);
-  if (!f)
+  if (!f) {
     return NULL;
+  }
 
   if (!_openslide_fseek(f, data->zisraw_offset + data->meta_pos,
                         SEEK_SET, err)) {
@@ -1089,8 +1120,7 @@ static char *read_czi_meta_xml(struct zeiss_ops_data *data, GError **err)
 /* find offset to embedded image with @name, such as Label */
 static bool locate_attachment_by_name(struct zeiss_ops_data *data,
                                       struct czi_att_info *att_info,
-                                      const char *name, GError **err)
-{
+                                      const char *name, GError **err) {
   struct zisraw_att_dir_hdr *hdr;
   struct zisraw_att_entry_a1 *att;
   size_t len;
@@ -1098,8 +1128,9 @@ static bool locate_attachment_by_name(struct zeiss_ops_data *data,
   char buf[512];
 
   g_autoptr(_openslide_file) f = _openslide_fopen(data->filename, err);
-  if (!f)
+  if (!f) {
     return false;
+  }
 
   if (!_openslide_fseek(f, data->zisraw_offset + data->att_dir_pos,
                         SEEK_SET, err)) {
@@ -1128,18 +1159,20 @@ static bool locate_attachment_by_name(struct zeiss_ops_data *data,
     if (g_strcmp0(att->name, name) == 0) {
       // + 32 bytes segment header + 256 bytes offset
       att_info->data_offset = att->file_pos + 32 + 256;
-      if (g_strcmp0(att->file_type, "JPG") == 0)
+      if (g_strcmp0(att->file_type, "JPG") == 0) {
         att_info->file_type = ATT_JPG;
-      else if (g_strcmp0(att->file_type, "CZI") == 0)
+      } else if (g_strcmp0(att->file_type, "CZI") == 0) {
         att_info->file_type = ATT_CZI;
+      }
 
       break;
     }
   }
 
-  if (att_info->file_type == ATT_JPG)
+  if (att_info->file_type == ATT_JPG) {
     _openslide_jpeg_read_dimensions(data->filename, att_info->data_offset,
                                     &att_info->w, &att_info->h, NULL);
+  }
   return true;
 }
 
@@ -1165,13 +1198,13 @@ static bool get_associated_image_data(struct _openslide_associated_image *_img,
   return false;
 }
 
-static void destroy_associated_image(struct _openslide_associated_image *_img)
-{
-  struct associated_image *img = (struct associated_image *) _img;
+static void destroy_associated_image(struct _openslide_associated_image *p) {
+  struct associated_image *img = (struct associated_image *) p;
 
   g_free(img->filename);
-  if (img->subblk)
+  if (img->subblk) {
     g_slice_free(struct czi_subblk, img->subblk);
+  }
 
   g_slice_free(struct associated_image, img);
 }
@@ -1181,12 +1214,10 @@ static const struct _openslide_associated_image_ops zeiss_associated_ops = {
   .destroy = destroy_associated_image,
 };
 
-static bool _add_associated_image(openslide_t *osr, const char *filename,
+static void add_one_associated_image(openslide_t *osr, const char *filename,
                                   const char *name,
                                   struct czi_att_info *att_info,
-                                  struct czi_subblk *sb,
-                                  GError **err G_GNUC_UNUSED)
-{
+                                  struct czi_subblk *sb) {
   struct associated_image *img = g_slice_new0(struct associated_image);
 
   img->base.ops = &zeiss_associated_ops;
@@ -1206,11 +1237,9 @@ static bool _add_associated_image(openslide_t *osr, const char *filename,
   }
 
   g_hash_table_insert(osr->associated_images, g_strdup(name), img);
-  return true;
 }
 
-static bool zeiss_add_associated_image(openslide_t *osr, GError **err)
-{
+static bool zeiss_add_associated_image(openslide_t *osr, GError **err) {
   struct zeiss_ops_data *outer_data = (struct zeiss_ops_data *) osr->data;
   struct zeiss_ops_data *data = NULL;
   struct czi_subblk *sb = NULL;
@@ -1222,8 +1251,9 @@ static bool zeiss_add_associated_image(openslide_t *osr, GError **err)
     // read the outermost CZI to get offset to ZISRAWFILE, or to JPEG
     memset(&att_info, 0, sizeof(struct czi_att_info));
     locate_attachment_by_name(outer_data, &att_info, map->czi_name, err);
-    if (att_info.data_offset == 0)
+    if (att_info.data_offset == 0) {
       continue;
+    }
 
     if (att_info.file_type == ATT_CZI) {
       data = g_slice_new0(struct zeiss_ops_data);
@@ -1231,8 +1261,12 @@ static bool zeiss_add_associated_image(openslide_t *osr, GError **err)
       data->zisraw_offset = att_info.data_offset;
 
       // knowing offset to ZISRAWFILE, now parse the embeded CZI
-      load_dir_position(data, err);
-      read_subblk_dir(data, err);
+      if (!load_dir_position(data, err)) {
+        return false;
+      }
+      if (!read_subblk_dir(data, err)) {
+        return false;
+      }
       xml = read_czi_meta_xml(data, err);
       att_info.pixel_real_bits = parse_xml_get_pixel_real_bits(xml, NULL);
       g_free(xml);
@@ -1240,8 +1274,8 @@ static bool zeiss_add_associated_image(openslide_t *osr, GError **err)
       sb = (struct czi_subblk *)data->subblks->pdata[0];
     }
 
-    _add_associated_image(osr, outer_data->filename, map->osr_name,
-                          &att_info, sb, err);
+    add_one_associated_image(osr, outer_data->filename, map->osr_name,
+                             &att_info, sb);
     if (data) {
       destroy_ops_data(data);
       data = NULL;
@@ -1251,11 +1285,74 @@ static bool zeiss_add_associated_image(openslide_t *osr, GError **err)
   return true;
 }
 
+/* find region boundaries on level 0, and pyramid levels of each region */
+static void init_regions(struct zeiss_ops_data *data) {
+  struct z_region *r;
+  struct czi_subblk *b;
+
+  data->regions = g_ptr_array_new_full(16, (GDestroyNotify) destroy_region);
+  for (int i = 0; i < data->scene; i++) {
+    r = g_slice_new0(struct z_region);
+    r->x1 = INT64_MAX;
+    r->y1 = INT64_MAX;
+    r->x2 = INT64_MIN;
+    r->y2 = INT64_MIN;
+    g_ptr_array_add(data->regions, r);
+  }
+
+  for (guint i = 0; i < data->subblks->len; i++) {
+    b = data->subblks->pdata[i];
+    // only check the first channel
+    if (b->channel != 0) {
+      continue;
+    }
+
+    r = data->regions->pdata[b->scene];
+    if (r->max_downsample < b->downsample_i) {
+      r->max_downsample = b->downsample_i;
+    }
+
+    // only check region boundary on top level
+    if (b->downsample_i != 1) {
+      continue;
+    }
+
+    r->x1 = MIN(r->x1, b->x1);
+    r->y1 = MIN(r->y1, b->y1);
+    r->x2 = MAX(r->x2, b->x1 + b->w);
+    r->y2 = MAX(r->y2, b->y1 + b->h);
+  }
+}
+
+static void set_region_props(openslide_t *osr) {
+  struct zeiss_ops_data *data = (struct zeiss_ops_data *) osr->data;
+  struct z_region *r;
+
+  for (int i = 0; i < data->scene; i++) {
+    r = data->regions->pdata[i];
+    g_hash_table_insert(
+        osr->properties,
+        g_strdup_printf(_OPENSLIDE_PROPERTY_NAME_TEMPLATE_REGION_X, i),
+        g_strdup_printf("%"PRId64, r->x1));
+    g_hash_table_insert(
+        osr->properties,
+        g_strdup_printf(_OPENSLIDE_PROPERTY_NAME_TEMPLATE_REGION_Y, i),
+        g_strdup_printf("%"PRId64, r->y1));
+    g_hash_table_insert(
+        osr->properties,
+        g_strdup_printf(_OPENSLIDE_PROPERTY_NAME_TEMPLATE_REGION_WIDTH, i),
+        g_strdup_printf("%"PRId64, r->x2 - r->x1));
+    g_hash_table_insert(
+        osr->properties,
+        g_strdup_printf(_OPENSLIDE_PROPERTY_NAME_TEMPLATE_REGION_HEIGHT, i),
+        g_strdup_printf("%"PRId64, r->y2 - r->y1));
+  }
+}
+
 static bool zeiss_open(openslide_t *osr, const char *filename,
                        struct _openslide_tifflike *t G_GNUC_UNUSED,
                        struct _openslide_hash *quickhash1 G_GNUC_UNUSED,
-                       GError **err)
-{
+                       GError **err) {
   struct zeiss_ops_data *data = g_slice_new0(struct zeiss_ops_data);
 
   osr->data = data;
@@ -1266,17 +1363,31 @@ static bool zeiss_open(openslide_t *osr, const char *filename,
   data->filename = g_strdup(filename);
   data->count_levels =
     g_hash_table_new_full(g_int64_hash, g_int64_equal,
-                          (GDestroyNotify) destroy_int64_key, NULL);
-  load_dir_position(data, err);
-  read_subblk_dir(data, err);
-  adjust_coordinate_origin(data, NULL);
+                          (GDestroyNotify) g_free, NULL);
+  if (!load_dir_position(data, err)) {
+    return false;
+   }
+  if (!read_subblk_dir(data, err)) {
+    return false;
+  }
+  adjust_coordinate_origin(data);
 
   g_autofree char *xml = read_czi_meta_xml(data, err);
-  parse_xml_set_prop(osr, xml, err);
+  if (!xml) {
+    return false;
+  }
+  if (!parse_xml_set_prop(osr, xml, err)) {
+    return false;
+  }
+
   combine_subblks_from_multichannels(data, NULL);
-  init_levels(osr, err);
-  init_range_grids(osr, err);
-  zeiss_add_associated_image(osr, err);
+  init_regions(data);
+  init_levels(osr);
+  init_range_grids(osr);
+  set_region_props(osr);
+  if (!zeiss_add_associated_image(osr, err)) {
+    return false;
+  }
   return true;
 }
 

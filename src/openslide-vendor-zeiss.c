@@ -1013,6 +1013,10 @@ static bool parse_xml_set_prop(openslide_t *osr, const char *xml,
                     Objectives
                         Objective
                             NominalMagnification  (objective-power)
+                    Detectors
+                        Detector
+                            Manufacturer
+                                Model
             Scaling
                 Items
                     <Distance Id="X">  (mpp X)
@@ -1069,6 +1073,13 @@ static bool parse_xml_set_prop(openslide_t *osr, const char *xml,
     d = _openslide_parse_double(gamma);
     g_ascii_dtostr(buf, sizeof(buf), d);
     set_prop(osr, "zeiss.display_gamma", buf);
+  }
+
+  g_autofree char *camera =
+    _openslide_xml_xpath_get_string(ctx,
+      "/ImageDocument/Metadata/Information/Instrument/Detectors/Detector/Manufacturer/Model/text()");
+  if (camera) {
+    set_prop(osr, "zeiss.camera", camera);
   }
 
   g_autofree char *obj =

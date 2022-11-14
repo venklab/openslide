@@ -675,11 +675,23 @@ static bool read_data_at_address(const char *filename, int64_t zisraw_offset,
   gray8_len = dst->w * dst->h;
   g_assert(gray8_len == ch[0].size);
   p = (uint32_t *) dst->data;
-  while (j < gray8_len) {
-    *p++ = MERGE_GRAY_TO_ARGB(ch[0].data[j],
-                              ch[1].data[j],
-                              ch[2].data[j]);
-    j++;
+  if (ca->subblks[1] == NULL && ca->subblks[2] == NULL) {
+    // single channel fluorescence image
+    while (j < gray8_len) {
+      *p++ = MERGE_GRAY_TO_ARGB(ch[0].data[j],
+                                ch[0].data[j],
+                                ch[0].data[j]);
+      j++;
+    }
+
+  } else {
+    // multi-channel fluorescence image
+    while (j < gray8_len) {
+      *p++ = MERGE_GRAY_TO_ARGB(ch[0].data[j],
+                                ch[1].data[j],
+                                ch[2].data[j]);
+      j++;
+    }
   }
 
   for (int i = 0; i < MAX_CHANNEL; i++)

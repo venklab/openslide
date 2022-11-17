@@ -21,7 +21,9 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
+          # fedora > 36 has the same "make check" problem when using
+          # ubuntu-latest
+          - os: ubuntu-22.04
             container: registry.fedoraproject.org/fedora:latest
             extra: extra checks
             sanitize: sanitize
@@ -56,6 +58,7 @@ jobs:
                 jpeg-turbo \
                 libtiff \
                 openjpeg \
+                jxrlib \
                 gdk-pixbuf \
                 libxml2 \
                 sqlite \
@@ -63,6 +66,8 @@ jobs:
                 glib \
                 xdelta \
                 doxygen
+            # jxrlib from homebrew has a bug
+            LC_ALL=C sed -i '' 's/#endif UNREFERENCED_PARAMETER/#endif/' /usr/local/Cellar/jxrlib/1.1_1/include/jxrlib/JXRMeta.h
             python -m pip install --upgrade pip
             pip install requests PyYAML
             ;;
@@ -78,16 +83,22 @@ jobs:
                     dnf copr enable -y bgilbert/el8-pixman-openslide
                     pyver=38
                     python=python38
+                    dnf install -y epel-release
+                    dnf install -y jxrlib-devel
                     ;;
                 9)
                     dnf install -y 'dnf-command(config-manager)'
                     dnf config-manager --set-enabled crb
                     dnf install -y epel-release epel-next-release
+                    # jxrlib is not in EPEL 9 as of Nov 17, 2022
+                    dnf install -y https://kojipkgs.fedoraproject.org//packages/jxrlib/1.1/23.el9/x86_64/jxrlib-1.1-23.el9.x86_64.rpm
+                    dnf install -y https://kojipkgs.fedoraproject.org//packages/jxrlib/1.1/23.el9/x86_64/jxrlib-devel-1.1-23.el9.x86_64.rpm
                     ;;
                 *)
                     extra="git-core clang llvm valgrind valgrind-devel"
                     extra="$extra dnf-plugins-core"
                     debuginfo=1
+                    dnf install -y jxrlib-devel
                     ;;
                 esac
 
@@ -136,6 +147,7 @@ jobs:
                     $jpeg \
                     libtiff-dev \
                     libopenjp2-7-dev \
+                    libjxr-dev \
                     libgdk-pixbuf2.0-dev \
                     libxml2-dev \
                     libsqlite3-dev \

@@ -6,6 +6,7 @@ on:
     tags: ["*"]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -21,24 +22,11 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
+          # fedora > 36 has the same "make check" problem when using
+          # ubuntu-latest
+          - os: ubuntu-22.04
             container: registry.fedoraproject.org/fedora:latest
             extra: extra checks
-            sanitize: sanitize
-          - os: ubuntu-latest
-            container: quay.io/centos/centos:stream8
-          # Use ubuntu-22.04 to get a newer Docker seccomp filter.  Otherwise
-          # "make check" fails with:
-          #     Spawning child failed: Failed to close file descriptor for child process (Operation not permitted)
-          - os: ubuntu-22.04
-            container: quay.io/centos/centos:stream9
-          - os: ubuntu-latest
-            container: debian:stable
-            ignore-cloexec-leaks: ignore CLOEXEC leaks
-          - os: ubuntu-20.04
-            ignore-cloexec-leaks: ignore CLOEXEC leaks
-          - os: ubuntu-22.04
-          - os: macos-12
             sanitize: sanitize
     steps:
     # Quick way to get Python 3 on macOS
@@ -59,6 +47,7 @@ jobs:
                 jpeg-turbo \
                 libtiff \
                 openjpeg \
+                jxrlib \
                 gdk-pixbuf \
                 libxml2 \
                 sqlite \
@@ -66,6 +55,8 @@ jobs:
                 glib \
                 xdelta \
                 doxygen
+            # jxrlib from homebrew has a bug
+            LC_ALL=C sed -i '' 's/#endif UNREFERENCED_PARAMETER/#endif/' /usr/local/Cellar/jxrlib/1.1_1/include/jxrlib/JXRMeta.h
             python -m pip install --upgrade pip
             pip install requests PyYAML
             ;;
@@ -81,16 +72,22 @@ jobs:
                     dnf copr enable -y bgilbert/el8-pixman-openslide
                     pyver=38
                     python=python38
+                    dnf install -y epel-release
+                    dnf install -y jxrlib-devel
                     ;;
                 9)
                     dnf install -y 'dnf-command(config-manager)'
                     dnf config-manager --set-enabled crb
                     dnf install -y epel-release epel-next-release
+                    # jxrlib is not in EPEL 9 as of Nov 17, 2022
+                    dnf install -y https://kojipkgs.fedoraproject.org//packages/jxrlib/1.1/23.el9/x86_64/jxrlib-1.1-23.el9.x86_64.rpm
+                    dnf install -y https://kojipkgs.fedoraproject.org//packages/jxrlib/1.1/23.el9/x86_64/jxrlib-devel-1.1-23.el9.x86_64.rpm
                     ;;
                 *)
                     extra="git-core clang llvm valgrind valgrind-devel"
                     extra="$extra dnf-plugins-core"
                     debuginfo=1
+                    dnf install -y jxrlib-devel
                     ;;
                 esac
 
@@ -139,6 +136,7 @@ jobs:
                     $jpeg \
                     libtiff-dev \
                     libopenjp2-7-dev \
+                    libjxr-dev \
                     libgdk-pixbuf2.0-dev \
                     libxml2-dev \
                     libsqlite3-dev \
@@ -219,56 +217,3 @@ jobs:
       if: matrix.extra
       run: cd test && ./driver exports
 
-  windows_setup:
-    name: Set up Windows build
-    runs-on: ubuntu-latest
-    outputs:
-      pkgver: ${{ steps.params.outputs.pkgver }}
-    steps:
-      - name: Calculate parameters
-        id: params
-        run: |
-          case "${{ github.event_name }}" in
-          pull_request)
-              echo "::set-output name=pkgver::pr-${{ github.event.number }}.${{ github.run_number }}.${{ github.run_attempt }}-$(echo ${{ github.sha }} | cut -c-7)"
-              ;;
-          push)
-              echo "::set-output name=pkgver::${GITHUB_REF#refs/heads/}-$(echo ${{ github.sha }} | cut -c-7)"
-              ;;
-          *)
-              echo "Unknown event type ${{ github.event_name }}"
-              exit 1
-          esac
-
-  windows_build:
-    name: Windows build
-    needs: windows_setup
-    uses: openslide/openslide-winbuild/.github/workflows/windows.yml@main
-    with:
-      openslide_repo: ${{ github.repository }}
-      openslide_ref: ${{ github.ref }}
-      pkgver: ${{ needs.windows_setup.outputs.pkgver }}
-      werror: true
-
-  docs:
-    name: Docs
-    runs-on: ubuntu-latest
-    container: registry.fedoraproject.org/fedora:latest
-    steps:
-    - name: Check out repo
-      uses: actions/checkout@v3
-    - name: Install tools
-      run: dnf install -y doxygen
-    - name: Build
-      run: |
-        basename=openslide-docs-$GITHUB_RUN_NUMBER-$(echo $GITHUB_SHA | cut -c-10)
-        mkdir artifact
-        cd doc
-        doxygen
-        mv html ../artifact/${basename}
-        echo "basename=${basename}" >> $GITHUB_ENV
-    - name: Archive
-      uses: actions/upload-artifact@v2
-      with:
-        name: ${{ env.basename }}
-        path: artifact

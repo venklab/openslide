@@ -66,25 +66,31 @@ PKG_CHECK_MODULES(LIBPNG, [libpng > 1.2])
 PKG_CHECK_MODULES(GDKPIXBUF, [gdk-pixbuf-2.0 >= 2.14])
 PKG_CHECK_MODULES(LIBXML2, [libxml-2.0])
 PKG_CHECK_MODULES(SQLITE3, [sqlite3 >= 3.14])
-PKG_CHECK_MODULES(LIBJXR, [libjxr], [FOUND_LIBJXR=1], [FOUND_LIBJXR=0])
+PKG_CHECK_MODULES(LIBJXR, [libjxr jxrlib], [FOUND_LIBJXR=1], [FOUND_LIBJXR=0])
 if test "$FOUND_LIBJXR" -eq 0; then
     AC_MSG_CHECKING([for LIBJXR without pkg-config])
     dnl Workaround for RHEL8, Debian < Bookworm, and Ubuntu < 22.04LTS. They
     dnl miss pkg-config file.
-    LIBJXR_CFLAGS="-I/usr/include/jxrlib/ -D__ANSI__ -DDISABLE_PERF_MEASUREMENT"
+    jxr_includedir="/usr/include/jxrlib/"
     dnl Debian
     if test -f /usr/lib/i386-linux-gnu/libjxrglue.so; then
-        LIBJXR_LIBS="-L/usr/lib/i386-linux-gnu/ -ljpegxr -ljxrglue"
+        jxr_libdir="/usr/lib/i386-linux-gnu/"
     fi
     if test -f /usr/lib/x86_64-linux-gnu/libjxrglue.so; then
-        LIBJXR_LIBS="-L/usr/lib/x86_64-linux-gnu/ -ljpegxr -ljxrglue"
+        jxr_libdir="/usr/lib/x86_64-linux-gnu/"
     fi
     dnl RHEL
     if test -f /usr/lib64/libjxrglue.so; then
-        LIBJXR_LIBS="-L/usr/lib64/ -ljpegxr -ljxrglue"
+        jxr_libdir="/usr/lib/lib64/"
     fi
-
-    if test "x$LIBJXR_CFLAGS" != x && test "x$LIBJXR_LIBS" != x; then
+    dnl MacOS, pkgconfig cannot find jxr installed by homebrew
+    if test -f /usr/local/Cellar/jxrlib/1.1_1/lib/libjxrglue.dylib; then
+        jxr_includedir="/usr/local/Cellar/jxrlib/1.1_1/include/jxrlib"
+        jxr_libdir="/usr/local/Cellar/jxrlib/1.1_1/lib"
+    fi
+    if test "x$jxr_libdir" != x && test "x$jxr_includedir" != x; then
+        LIBJXR_LIBS="-L${jxr_libdir} -ljpegxr -ljxrglue"
+        LIBJXR_CFLAGS="-I${jxr_includedir} -D__ANSI__ -DDISABLE_PERF_MEASUREMENT"
         FOUND_LIBJXR=1
         AC_MSG_RESULT([yes])
         AC_SUBST([LIBJXR_CFLAGS])

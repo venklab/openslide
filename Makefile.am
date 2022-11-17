@@ -88,6 +88,7 @@ noinst_HEADERS = \
 	src/openslide-decode-jp2k.h \
 	src/openslide-decode-jpeg.h \
 	src/openslide-decode-png.h \
+	src/openslide-decode-jxr.h \
 	src/openslide-decode-sqlite.h \
 	src/openslide-decode-tiff.h \
 	src/openslide-decode-tifflike.h \

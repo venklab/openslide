@@ -131,7 +131,7 @@ bool _openslide_jxr_decode_buf(void *data, size_t datalen,
                                struct jxr_decoded *dst) {
 
   struct WMPStream *pStream = NULL;
-  PKImageDecode *pDecoder = NULL;
+  struct tagPKImageDecode *pDecoder = NULL;
   PKFormatConverter *pConverter = NULL;
   ERR err;
   PKPixelFormatGUID fmt;

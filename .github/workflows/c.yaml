@@ -6,6 +6,7 @@ on:
     tags: ["*"]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -21,9 +22,7 @@ jobs:
     strategy:
       matrix:
         include:
-          # fedora > 36 has the same "make check" problem when using
-          # ubuntu-latest
-          - os: ubuntu-22.04
+          - os: ubuntu-latest
             container: registry.fedoraproject.org/fedora:latest
             extra: extra checks
             sanitize: sanitize
@@ -84,21 +83,16 @@ jobs:
                     pyver=38
                     python=python38
                     dnf install -y epel-release
-                    dnf install -y jxrlib-devel
                     ;;
                 9)
                     dnf install -y 'dnf-command(config-manager)'
                     dnf config-manager --set-enabled crb
                     dnf install -y epel-release epel-next-release
-                    # jxrlib is not in EPEL 9 as of Nov 17, 2022
-                    dnf install -y https://kojipkgs.fedoraproject.org//packages/jxrlib/1.1/23.el9/x86_64/jxrlib-1.1-23.el9.x86_64.rpm
-                    dnf install -y https://kojipkgs.fedoraproject.org//packages/jxrlib/1.1/23.el9/x86_64/jxrlib-devel-1.1-23.el9.x86_64.rpm
                     ;;
                 *)
                     extra="git-core clang llvm valgrind valgrind-devel"
                     extra="$extra dnf-plugins-core"
                     debuginfo=1
-                    dnf install -y jxrlib-devel
                     ;;
                 esac
 
@@ -111,6 +105,7 @@ jobs:
                     libjpeg-turbo-devel \
                     libtiff-devel \
                     openjpeg2-devel \
+                    jxrlib-devel \
                     gdk-pixbuf2-modules gdk-pixbuf2-devel \
                     libxml2-devel \
                     sqlite-devel \

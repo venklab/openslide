@@ -1338,6 +1338,7 @@ static void init_regions(struct zeiss_ops_data *data) {
     r->y1 = INT64_MAX;
     r->x2 = INT64_MIN;
     r->y2 = INT64_MIN;
+    r->max_downsample = INT64_MIN;
     g_ptr_array_add(data->regions, r);
   }
 

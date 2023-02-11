@@ -31,9 +31,6 @@
   (0xFF000000 | (uint32_t)((p)[0]) | ((uint32_t)((p)[1]) << 8) |               \
    ((uint32_t)((p)[2]) << 16))
 
-#define GRAY16TOGRAY8(p, ns)                                                   \
-  (uint8_t)((((uint16_t)((p)[0])) | (((uint16_t)((p)[1])) << 8)) >> ns)
-
 #define BGR48TOARGB32(p)                                                       \
   (0xFF000000 | (uint32_t)((p)[1]) | ((uint32_t)((p)[3]) << 8) |               \
    ((uint32_t)((p)[5]) << 16))
@@ -91,6 +88,16 @@ static guint get_bits_per_pixel(const PKPixelFormatGUID *pixel_format)
   return pixel_info.cbitUnit;
 }
 
+static inline uint8_t gray16togray8(uint8_t *p, int ns)
+{
+  uint16_t v = *((uint16_t *)p) >> ns;
+
+  /* 14 bits gray image in zeiss Axioscan7 sometimes uses more than 14 bits,
+   * these pixels appear black if treated as 14 bits */
+  // sadly, conditional makes convert at least 15% slower
+  return (v > 255) ? 255 : (uint8_t) v;
+}
+
 /* GUID_PKPixelFormat24bppBGR has 24bits per pixel. CAIRO_FORMAT_RGB24 has
  * 32bits, with the upper 8 bits unused
  */
@@ -144,7 +151,7 @@ bool convert_gray16_to_gray8(struct jxr_decoded *p, int pixel_real_bits)
   size_t i = 0;
 
   while (i < p->size) {
-    *bp++ = GRAY16TOGRAY8(&p->data[i], nshift);
+    *bp++ = gray16togray8(&p->data[i], nshift);
     i += 2;
   }
 

@@ -34,9 +34,10 @@
 #include <string.h>
 #include <math.h>
 
-#include <tiffio.h>
 #include <libxml/tree.h>
 #include <libxml/xpath.h>
+#include <tiffio.h>
+#include <zstd.h>
 
 #define CZI_SEG_ID_LEN   16
 #define MAX_CHANNEL       3
@@ -197,6 +198,14 @@ struct czi_att_info {
   int file_type;
 };
 
+struct czi_zstd_payload_hdr {
+  uint8_t size;       /* either 1 or 3 */
+  uint8_t chunk_type;     /* the only valid type is 1 */
+  /* whether the czi zstd1 high low bytes pack trick is used */
+  uint8_t is_hi_low_swap;
+};
+
+
 static struct associated_image_mapping {
   char *czi_name;
   char *osr_name;
@@ -218,6 +227,8 @@ enum z_compression {
   COMP_JPEG,
   COMP_LZW,
   COMP_JXR = 4,
+  COMP_ZSTD0 = 5,
+  COMP_ZSTD1 = 6,
   COMP_OTHER,
 };
 
@@ -562,7 +573,117 @@ static bool czi_uncompressed_read(const char *filename,
 }
 
 
+static bool parse_czi_zstd_payload_hdr(struct czi_zstd_payload_hdr *hdr,
+                                       char *buf) {
+    memcpy(hdr, buf, sizeof(struct czi_zstd_payload_hdr));
+    if (hdr->size == 1) {
+      return true;
+    } else if (hdr->size == 3 && hdr->chunk_type == 1) {
+      /* czi only cares the lowest bit */
+      hdr->is_hi_low_swap &= 1;
+      return true;
+    }
 
+    return false;
+}
+
+/* czi zstd1 compression mode has an option to pack less significant byte of
+ * 16 bits pixels in the first half of image array, and more significant byte
+ * in the second half of image array.
+ */
+static void restore_czi_zstd1_highlow(struct jxr_decoded *dst) {
+  size_t half_len = dst->size / 2;
+  uint8_t *buf = g_malloc(dst->size);
+  uint8_t *p = buf;
+  uint8_t *slo = dst->data;
+  uint8_t *shi = dst->data + half_len;
+  for (size_t i = 0; i < half_len; i++) {
+    *p++ = *slo++;
+    *p++ = *shi++;
+  }
+
+  g_free(dst->data);
+  dst->data = buf;
+}
+
+static bool czi_zstd_read(const char *filename, int64_t pos, int64_t len,
+                          int32_t pixel_type, int32_t pixel_real_bits,
+                          struct jxr_decoded *dst, int32_t compression,
+                          GError **err) {
+  g_autoptr(_openslide_file) f = _openslide_fopen(filename, err);
+  if (!f) {
+    return false;
+  }
+
+  if (!_openslide_fseek(f, pos, SEEK_SET, err)) {
+    g_prefix_error(err, "Couldn't seek to czi zstd compressed payload");
+    return false;
+  }
+
+  g_autofree char *inbuf = g_malloc(len);
+  if (_openslide_fread(f, inbuf, (size_t)len) != (size_t)len) {
+    g_set_error(err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_FAILED,
+                "Couldn't read czi zstd compressed payload");
+    return false;
+  }
+
+  struct czi_zstd_payload_hdr hdr;
+  hdr.size = 0; /* zstd0 compression doesn't add prefix header */
+  hdr.is_hi_low_swap = 0;
+  if (compression == COMP_ZSTD1 && !parse_czi_zstd_payload_hdr(&hdr, inbuf)) {
+    g_set_error(err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_FAILED,
+                "Couldn't parse czi zstd1 compressed payload header");
+    return false;
+  }
+
+  int pixel_bytes;
+  switch (pixel_type) {
+  case PT_BGR48:
+    pixel_bytes = 6;
+    break;
+  case PT_GRAY16:
+    pixel_bytes = 2;
+    break;
+  case PT_GRAY8:
+    pixel_bytes = 1;
+    break;
+  default:
+    pixel_bytes = 3;
+    break;
+  }
+
+  size_t zstd_uncomp_size =
+      ZSTD_getFrameContentSize(inbuf + hdr.size, len - hdr.size);
+  dst->size = dst->w * dst->h * pixel_bytes;
+  g_assert(dst->size == zstd_uncomp_size);
+  dst->data = g_malloc(dst->size);
+  size_t rc =
+      ZSTD_decompress(dst->data, dst->size, inbuf + hdr.size, len - hdr.size);
+  if (ZSTD_isError(rc)) {
+    const char *zstd_msg = ZSTD_getErrorName(rc);
+    g_set_error(err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_FAILED,
+                "ZSTD_decompress error %s", zstd_msg);
+  }
+
+  switch (pixel_type) {
+  case PT_BGR48:
+    /* restore image modified by czi zstd1 high low byte pack trick */
+    if (hdr.is_hi_low_swap == 1) {
+      restore_czi_zstd1_highlow(dst);
+    }
+    return convert_48bppbgr_to_cairo24bpprgb(dst);
+  case PT_GRAY16:
+    if (hdr.is_hi_low_swap == 1) {
+      restore_czi_zstd1_highlow(dst);
+    }
+    return convert_gray16_to_gray8(dst, pixel_real_bits);
+  case PT_GRAY8:
+    return true;
+  default:
+    break;
+  }
+  return convert_24bppbgr_to_cairo24bpprgb(dst);
+}
 
 static bool read_data_from_subblk(const char *filename, int64_t zisraw_offset,
                                   struct czi_subblk *sb, int pixel_real_bits,
@@ -617,6 +738,13 @@ static bool read_data_from_subblk(const char *filename, int64_t zisraw_offset,
     _openslide_jxr_read(filename, data_pos, GINT64_FROM_LE(hdr->data_size),
                         pixel_real_bits, (struct jxr_decoded *)dst, NULL);
     break;
+
+  case COMP_ZSTD0:
+  case COMP_ZSTD1:
+    return czi_zstd_read(filename, data_pos, GINT64_FROM_LE(hdr->data_size),
+        sb->pixel_type, pixel_real_bits, dst, sb->compression, NULL);
+    break;
+
   case COMP_JPEG:
     g_warning("JPEG is not supported\n");
     return false;

@@ -66,6 +66,7 @@ PKG_CHECK_MODULES(LIBPNG, [libpng > 1.2])
 PKG_CHECK_MODULES(GDKPIXBUF, [gdk-pixbuf-2.0 >= 2.14])
 PKG_CHECK_MODULES(LIBXML2, [libxml-2.0])
 PKG_CHECK_MODULES(SQLITE3, [sqlite3 >= 3.6])
+PKG_CHECK_MODULES(LIBZSTD, [libzstd])
 
 dnl Workaround for CentOS7, Debian < Bookworm, and Ubuntu < 22.04LTS. They
 dnl miss libjxr.pc

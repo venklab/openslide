@@ -22,8 +22,8 @@
 #ifndef OPENSLIDE_OPENSLIDE_DECODE_JXR_H_
 #define OPENSLIDE_OPENSLIDE_DECODE_JXR_H_
 
-#include <stdint.h>
 #include <glib.h>
+#include <stdint.h>
 #include <JXRGlue.h>
 
 /* JPEG XR support */
@@ -44,9 +44,8 @@ static void jxr_decoded_free(struct jxr_decoded *p) {
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(jxr_decoded, jxr_decoded_free)
 
-bool _openslide_jxr_decode_buf(void *data, size_t datalen,
-                               int pixel_real_bits, struct jxr_decoded *dst,
-                               GError **err);
+bool _openslide_jxr_decode_buf(void *data, size_t datalen, int pixel_real_bits,
+                               struct jxr_decoded *dst, GError **err);
 
 bool _openslide_jxr_read(const char *filename, int64_t pos, int64_t jxr_len,
                          int pixel_real_bits, struct jxr_decoded *dst,

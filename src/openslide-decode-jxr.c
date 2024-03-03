@@ -104,7 +104,7 @@ static inline uint8_t gray16togray8(uint8_t *p, int ns)
 bool convert_24bppbgr_to_cairo24bpprgb(struct jxr_decoded *p)
 {
   size_t new_size = p->w * p->h * 4;
-  uint32_t *buf = g_slice_alloc(new_size);
+  uint32_t *buf = g_malloc(new_size);
   uint32_t *bp = buf;
   size_t i = 0;
 
@@ -113,7 +113,7 @@ bool convert_24bppbgr_to_cairo24bpprgb(struct jxr_decoded *p)
     i += 3;
   }
 
-  g_slice_free1(p->size, p->data);
+  g_free(p->data);
   p->stride = p->w * 4;
   p->pixel_bits = 32;
   p->size = new_size;
@@ -124,7 +124,7 @@ bool convert_24bppbgr_to_cairo24bpprgb(struct jxr_decoded *p)
 bool convert_48bppbgr_to_cairo24bpprgb(struct jxr_decoded *p)
 {
   size_t new_size = p->w * p->h * 4;
-  uint32_t *buf = g_slice_alloc(new_size);
+  uint32_t *buf = g_malloc(new_size);
   uint32_t *bp = buf;
   size_t i = 0;
 
@@ -133,7 +133,7 @@ bool convert_48bppbgr_to_cairo24bpprgb(struct jxr_decoded *p)
     i += 6;
   }
 
-  g_slice_free1(p->size, p->data);
+  g_free(p->data);
   p->stride = p->w * 4;
   p->pixel_bits = 32;
   p->size = new_size;
@@ -145,7 +145,7 @@ bool convert_48bppbgr_to_cairo24bpprgb(struct jxr_decoded *p)
 bool convert_gray16_to_gray8(struct jxr_decoded *p, int pixel_real_bits)
 {
   size_t new_size = p->w * p->h;
-  uint8_t *buf = g_slice_alloc(new_size);
+  uint8_t *buf = g_malloc(new_size);
   uint8_t *bp = buf;
   int nshift = pixel_real_bits - 8;
   size_t i = 0;
@@ -155,7 +155,7 @@ bool convert_gray16_to_gray8(struct jxr_decoded *p, int pixel_real_bits)
     i += 2;
   }
 
-  g_slice_free1(p->size, p->data);
+  g_free(p->data);
   p->stride = p->w;
   p->pixel_bits = 8;
   p->size = new_size;
@@ -213,7 +213,7 @@ bool _openslide_jxr_decode_buf(void *data, size_t datalen,
   dst->stride = (rect.Width * MAX(get_bits_per_pixel(&fmt),
                                    get_bits_per_pixel(&fmt_out)) + 7) / 8;
   dst->size = dst->stride * dst->h;
-  dst->data = g_slice_alloc(dst->size);
+  dst->data = g_malloc(dst->size);
   dst->pixel_bits = get_bits_per_pixel(&fmt_out);
 
   //Create color converter

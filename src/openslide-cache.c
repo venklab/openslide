@@ -25,6 +25,7 @@
 #include <glib.h>
 
 #define DEFAULT_CACHE_SIZE (1024*1024*32)
+#define MAX_CACHE_SIZE (1024*1024*1024)
 
 // hash table key
 struct _openslide_cache_key {
@@ -202,7 +203,15 @@ struct _openslide_cache_binding *_openslide_cache_binding_create(void) {
   struct _openslide_cache_binding *cb =
     g_new0(struct _openslide_cache_binding, 1);
   g_mutex_init(&cb->mutex);
-  cb->cache = _openslide_cache_create(DEFAULT_CACHE_SIZE);
+  uint64_t cache_size = DEFAULT_CACHE_SIZE;
+  char *env = getenv("OPENSLIDE_CACHE_SIZE");
+  if (env != NULL) {
+    uint64_t tmp = (uint64_t)atol(env);
+    if (tmp > 0 && tmp < MAX_CACHE_SIZE) {
+      cache_size = tmp;
+    }
+  }
+  cb->cache = _openslide_cache_create(cache_size);
   cb->id = cb->cache->next_binding_id++;
   return cb;
 }
